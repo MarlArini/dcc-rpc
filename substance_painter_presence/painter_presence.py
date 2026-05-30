@@ -8,7 +8,6 @@ from __future__ import annotations
 import atexit
 from dataclasses import dataclass
 import os
-import sys
 import time
 from typing import Callable, ClassVar, Dict, List, Tuple
 import PySide6.QtGui as QtG
@@ -21,11 +20,6 @@ from common import plural as sp_plural
 from colors import find_closest
 from colors import SUBSTANCEPAINTER_PAINT_SUBSET, SUBSTANCEPAINTER_PHYSPAINT_SUBSET
 
-# Bootstrap: ensure this plugin's directory is on sys.path so the sibling
-# common.py and pypresence/ resolve when loaded by the host application.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
 
 # Querying the active tool is via Qt widget inspection at runtime and uses the text
 # field of the buttons; the text varies per-locale
@@ -483,11 +477,55 @@ def sp_restart_presence():
         SP_STOP_ACTION.setEnabled(True)
 
 
+def _sp_find_discord_action(menu_bar):
+    """Walk the menu bar's actions and return the one titled "Discord", or None.
+
+    Defensive: a stale wrapper on any action can raise RuntimeError on .text()
+    ("Internal C++ object already deleted"); skip those and keep looking.
+    """
+    try:
+        actions = menu_bar.actions()
+    except RuntimeError:
+        return None
+    for action in actions:
+        try:
+            if action.text() == "Discord":
+                return action
+        except RuntimeError:
+            continue
+    return None
+
+
+def _sp_remove_discord_menu(menu_bar):
+    """Remove the Discord submenu from `menu_bar` if present. Safe to call
+    when no such submenu exists; safe under stale-wrapper conditions."""
+    action = _sp_find_discord_action(menu_bar)
+    if action is None:
+        return
+    try:
+        menu = action.menu()
+    except RuntimeError:
+        menu = None
+    try:
+        menu_bar.removeAction(action)
+    except RuntimeError:
+        pass
+    if menu is not None:
+        try:
+            menu.deleteLater()
+        except RuntimeError:
+            pass
+
+
 def sp_install_settings_menu():
     try:
         global SP_START_ACTION, SP_STOP_ACTION
         main_window = sp.ui.get_main_window()
         menu_bar = main_window.menuBar()
+        # Defensive: if a previous load left a Discord menu (e.g. uninstall
+        # failed on a stale wrapper during a prior reload), strip it before
+        # adding a new one so reloads don't stack duplicates.
+        _sp_remove_discord_menu(menu_bar)
         plugin_menu = menu_bar.addMenu("Discord")
         settings_action = plugin_menu.addAction("Settings")
         settings_action.triggered.connect(sp_open_settings_menu)
@@ -503,14 +541,17 @@ def sp_install_settings_menu():
 
 def sp_uninstall_settings_menu():
     sp_close_settings_menu()
-    if SP_PLUGIN.menubar_item is None:
-        return
+    # Don't trust SP_PLUGIN.menubar_item — the host's plugin reload can leave
+    # that wrapper in a "C++ object already deleted" state even while the
+    # underlying QMenu is still parented to the menu bar. Locating the menu
+    # by title walks the live menu bar and is robust to that case.
     try:
         main_window = sp.ui.get_main_window()
         menu_bar = main_window.menuBar()
-        menu_bar.removeAction(SP_PLUGIN.menubar_item.menuAction())
+        _sp_remove_discord_menu(menu_bar)
     except Exception:
         sp.logging.warning("[PainterPresence] Unable to uninstall settings menu.")
+    SP_PLUGIN.menubar_item = None
 
 
 ###################

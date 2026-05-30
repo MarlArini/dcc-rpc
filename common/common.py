@@ -616,7 +616,7 @@ class JSONSharedSettings:
     def _load_warn(self, key="", default: Any = None):
         if not key:
             self._warn(
-                f"[{self._app_name.capitalize()}Presence] Error loading preferences:"
+                f"[{self._app_name.capitalize()}Presence] Error loading preferences: "
                 "falling back to default settings"
             )
         else:

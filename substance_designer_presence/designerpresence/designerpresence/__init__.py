@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 import logging
 import atexit
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, List, Tuple, cast, Dict, Callable
 import PySide6.QtGui as QtG
@@ -34,7 +34,8 @@ from common import plural as sp_plural
 class SPSettings(SPSharedSettings, JSONSharedSettings):
     _PREFIX: ClassVar[str] = "designerPresence_"
     INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
-        ("Project name", "project"),
+        ("Package name", "package"),
+        ("Graph name", "graph"),
         ("Active node", "active_node"),
         ("Node count", "node_count"),
         ("Output node count", "out_node_count"),
@@ -43,7 +44,11 @@ class SPSettings(SPSharedSettings, JSONSharedSettings):
         ("Resource count", "resource_count"),
         ("Color space", "color_space"),
     ]
-    _INITIAL_DEFAULTS = {"detailsType": "project", "stateType": "node_count"}
+    _INITIAL_DEFAULTS = {"detailsType": "package", "stateType": "graph"}
+    replaceUnderscores: bool = field(
+        default=True,
+        metadata={"group": "General", "label": "Replace _ in graph names with spaces"},
+    )
 
 
 ###########
@@ -63,7 +68,8 @@ class SPPlugin(RPCBasePlugin):
     )
     # fmt: on
     display_types: ClassVar[Dict[str, Callable]] = {
-        "project": lambda ctx: ctx.project_name(),
+        "package": lambda ctx: ctx.package_name(),
+        "graph": lambda ctx: ctx.graph_name(),
         "active_node": lambda ctx: ctx.node_name(),
         "node_count": lambda ctx: ctx.num_nodes(),
         "out_node_count": lambda ctx: ctx.num_output_nodes(),
@@ -89,7 +95,7 @@ class SPPlugin(RPCBasePlugin):
             prefs_class=SPSettings,
             warn=self.logger.warning,
             error=self.logger.error,
-            path=self.app.getPluginMgr().getUserPluginsDir()
+            path=self.app.getPluginMgr().getUserPluginsDir(),
         )
 
     def start(self):
@@ -108,9 +114,7 @@ class SPPlugin(RPCBasePlugin):
             self.rpc_client.clear()
             self.rpc_client.close()
         except Exception:
-            self.logger.exception(
-                "[DesignerPresence] failed to clear and close client"
-            )
+            self.logger.exception("[DesignerPresence] failed to clear and close client")
 
     def _capture(self):
         return SPContext.capture()
@@ -164,24 +168,17 @@ class SPContext:
 
     def package_name(self) -> str:
         path = self.package.getFilePath()
-        return Path(path).name if path else "Unsaved Package"
+        return f"Package: {Path(path).name}" if path else "Unsaved Package"
 
-    def graph_name(self) -> str | None:
+    def graph_name(self) -> str:
         v = self.graph.getAnnotationPropertyValueFromId("identifier")
-        return (
-            cast(sd.api.sdvaluestring.SDValueString, v).get() if v is not None else None
-        )
-
-    def project_name(self) -> str | None:
-        package_name = self.package_name()
-        graph_name = self.graph_name()
-        if package_name is not None and graph_name is not None:
-            return package_name + " | " + graph_name
-        elif package_name is not None:
-            return package_name
-        elif graph_name is not None:
-            return graph_name
-        return None
+        if v is None:
+            return "Unsaved graph"
+        name = cast(sd.api.sdvaluestring.SDValueString, v).get()
+        if SP_PLUGIN.prefs.replaceUnderscores:
+            return f"Graph: {name.replace('_', ' ')}"
+        else:
+            return f"Graph: {name}"
 
     def node_name(self) -> str | None:
         nodes = self.uimgr.getCurrentGraphSelectedNodes()
@@ -224,7 +221,7 @@ class SPContext:
         if v is None:
             return None
         model = cast(sd.api.sdvaluestring.SDValueString, v).get()
-        if model is None or model == "Undefined":
+        if not model or model == "Undefined":
             return None
         return f"Material model: {model}"
 
@@ -294,6 +291,46 @@ def sp_restart_presence():
         SP_STOP_ACTION.setEnabled(True)
 
 
+def _sp_find_discord_action(menu_bar):
+    """Walk the menu bar's actions and return the one titled "Discord", or None.
+
+    Defensive: a stale wrapper on any action can raise RuntimeError on .text()
+    ("Internal C++ object already deleted"); skip those and keep looking.
+    """
+    try:
+        actions = menu_bar.actions()
+    except RuntimeError:
+        return None
+    for action in actions:
+        try:
+            if action.text() == "Discord":
+                return action
+        except RuntimeError:
+            continue
+    return None
+
+
+def _sp_remove_discord_menu(menu_bar):
+    """Remove the Discord submenu from `menu_bar` if present. Safe to call
+    when no such submenu exists; safe under stale-wrapper conditions."""
+    action = _sp_find_discord_action(menu_bar)
+    if action is None:
+        return
+    try:
+        menu = action.menu()
+    except RuntimeError:
+        menu = None
+    try:
+        menu_bar.removeAction(action)
+    except RuntimeError:
+        pass
+    if menu is not None:
+        try:
+            menu.deleteLater()
+        except RuntimeError:
+            pass
+
+
 def sp_install_settings_menu():
     if (uimgr := SP_PLUGIN.uimgr) is None or (
         main_window := uimgr.getMainWindow()
@@ -301,6 +338,7 @@ def sp_install_settings_menu():
         SP_PLUGIN.logger.error("[DesignerPresence] Unable to install settings menu.")
         return
     menu_bar = main_window.menuBar()
+    _sp_remove_discord_menu(menu_bar)
     plugin_menu = menu_bar.addMenu("Discord")
     settings_action = plugin_menu.addAction("Settings")
     settings_action.triggered.connect(sp_open_settings_menu)
@@ -314,15 +352,21 @@ def sp_install_settings_menu():
 
 
 def sp_uninstall_settings_menu():
-    if SP_PLUGIN.menubar_item is None:
-        return
     if (uimgr := SP_PLUGIN.uimgr) is None or (
         main_window := uimgr.getMainWindow()
     ) is None:
         SP_PLUGIN.logger.error("[DesignerPresence] Unable to uninstall settings menu.")
         return
-    menu_bar = main_window.menuBar()
-    menu_bar.removeAction(SP_PLUGIN.menubar_item.menuAction())
+    try:
+        menu_bar = main_window.menuBar()
+    except RuntimeError as e:
+        SP_PLUGIN.logger.warning(
+            f"[DesignerPresence] Could not access menu bar during uninstall: {e}"
+        )
+        SP_PLUGIN.menubar_item = None
+        return
+    _sp_remove_discord_menu(menu_bar)
+    SP_PLUGIN.menubar_item = None
 
 
 ###################

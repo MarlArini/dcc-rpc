@@ -1,6 +1,7 @@
 """
 Bundle each plugin into a deployable form under ./dist/.
 """
+import ast
 import shutil
 import subprocess
 import sys
@@ -25,10 +26,105 @@ def _find_pypresence() -> Path:
     return Path(pypresence.__file__).resolve().parent
 
 
+def _to_relative_imports(text: str, modules: list[str]) -> str:
+    """Prepend a leading dot to every `from <mod>` import line in `text` for
+    each name in `modules`.
+
+    Handles both bare-form (`from common import X`) and submodule-form
+    (`from pypresence.presence import Presence`). Does not touch lines that
+    are already relative (`from .common`) or imports of unrelated names that
+    happen to start with the same prefix.
+
+    Why this matters: Adobe Substance Painter, Designer, and Krita do not
+    reliably add the loaded plugin's directory to sys.path before running
+    module-level imports, so absolute imports of bundled siblings
+    (`from common`, `from colors`, `from pypresence`) fail with
+    ModuleNotFoundError at load time. Converting them to relative imports
+    during the build sidesteps the sys.path question entirely.
+    """
+    result = text
+    for mod in modules:
+        # `from common ` -> `from .common ` ; `from common.X` -> `from .common.X`.
+        # The trailing space / dot match prevents accidentally rewriting an
+        # unrelated module that happens to start with the same prefix.
+        result = result.replace(f"from {mod} ", f"from .{mod} ")
+        result = result.replace(f"from {mod}.", f"from .{mod}.")
+    return result
+
+
+def _swap_qt_binding(text: str, target: str) -> str:
+    """Retarget `from PySide6 ...` / `import PySide6 ...` to a different Qt
+    binding (e.g. "PyQt5" for Krita).
+
+    common.py uses PySide6 because that's what every other host's plugin
+    Python ships with and what our tests run against. Krita's bundled Python
+    only has PyQt5, so a bundled common.py with `from PySide6` raises
+    ModuleNotFoundError at plugin-load time. A straight text substitution
+    works because PySide6 and PyQt5 expose the same API for the Qt classes
+    common.py touches (QObject, QTimer, QDialog, QCheckBox, QSpinBox,
+    QFormLayout, ...).
+
+    Pass target="PySide6" to leave the text unchanged.
+    """
+    if target == "PySide6":
+        return text
+    result = text.replace("from PySide6", f"from {target}")
+    result = result.replace("import PySide6", f"import {target}")
+    return result
+
+
+def _validate_python(path: Path) -> None:
+    """ast.parse the file so a broken rewrite is caught at build time, not at
+    plugin-load time inside the host application (where the error surface
+    can be a silent failure or a console buried behind a UI)."""
+    try:
+        ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except SyntaxError as e:
+        sys.exit(f"[build] rewritten file {path} has a syntax error: {e}")
+
+
+def _write_rewritten(src: Path, dst: Path, modules: list[str]) -> None:
+    """Read `src`, apply _to_relative_imports for `modules`, write to `dst`,
+    and ast.parse the result to catch breakage at build time."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    rewritten = _to_relative_imports(src.read_text(encoding="utf-8"), modules)
+    dst.write_text(rewritten, encoding="utf-8")
+    _validate_python(dst)
+
+
+def _write_common_subpackage(
+    parent: Path, pypresence_src: Path, qt_binding: str = "PySide6"
+) -> None:
+    """Build a `common/` subpackage under `parent`:
+        common/
+          __init__.py     (the COMMON_SRC content, rewritten to `from .pypresence`
+                           and optionally retargeted to a different Qt binding)
+          pypresence/     (third-party, nested as a sibling of __init__.py)
+
+    Used by Designer (qt_binding="PySide6", the default) and Krita
+    (qt_binding="PyQt5"). Both hosts need common.py and pypresence in a
+    self-contained subpackage so the relative imports resolve without any
+    sys.path setup at plugin-load time.
+    """
+    common_dir = parent / "common"
+    common_dir.mkdir()
+    text = _to_relative_imports(COMMON_SRC.read_text(encoding="utf-8"), ["pypresence"])
+    text = _swap_qt_binding(text, qt_binding)
+    init_path = common_dir / "__init__.py"
+    init_path.write_text(text, encoding="utf-8")
+    _validate_python(init_path)
+    shutil.copytree(pypresence_src, common_dir / "pypresence", ignore=IGNORE)
+
+
 def _drop_runtime(target: Path, pypresence_src: Path, colors: bool = False) -> None:
     """
     Copy common.py, pypresence/, and optionally the color-name package into a
     target directory. The target directory must already exist.
+
+    Used by bundles whose host (Maya, Nuke) reliably puts the plugin directory
+    on sys.path before running module-level imports, so absolute imports of
+    siblings work. Painter and Designer don't honor that contract — see
+    _bundle_painter / _bundle_designer for the relative-import variants.
     """
     target.mkdir(parents=True, exist_ok=True)
     shutil.copy2(COMMON_SRC, target / "common.py")
@@ -61,15 +157,31 @@ def _bundle_designer(pypresence_src: Path) -> None:
             pluginInfo.json
             makepackage.py
             designerpresence/                 (inner Python package)
-              __init__.py
-              common.py
-              pypresence/
+              __init__.py                     (rewritten: `from common` -> `from .common`)
+              common/                          (subpackage; was a single common.py)
+                __init__.py                    (was common.py, with `from .pypresence`)
+                pypresence/                    (moved inside common/ so common.py's
+                                                 sibling-import resolves under the package)
+
+    Why the restructure: Designer doesn't put the loaded plugin's directory
+    on sys.path before running module-level imports, so the older layout's
+    `from common import ...` would ModuleNotFoundError at plugin load. We
+    convert sibling imports to relative form and nest pypresence under common/
+    because common.py is the only file that imports pypresence; keeping them
+    co-located makes the relative-import surface trivial.
     """
     src = REPO / "substance_designer_presence" / "designerpresence"
     dst = DIST / "designer_presence" / "designerpresence"
     shutil.copytree(src, dst, ignore=IGNORE)
     inner = dst / "designerpresence"
-    _drop_runtime(inner, pypresence_src)
+
+    # Rewrite designerpresence/__init__.py: `from common ...` -> `from .common ...`.
+    init_path = inner / "__init__.py"
+    _write_rewritten(init_path, init_path, modules=["common"])
+
+    # Build the common/ subpackage with pypresence/ nested inside it.
+    # Designer's plugin Python ships PySide6, so no Qt-binding swap needed.
+    _write_common_subpackage(inner, pypresence_src, qt_binding="PySide6")
 
     result = subprocess.run(
         [sys.executable, "makepackage.py"],
@@ -113,8 +225,8 @@ def _bundle_painter(pypresence_src: Path) -> None:
     """Produces:
         dist/substance_painter_presence/     (drop into Painter user_plugins/startup/)
           __init__.py
-          painter_presence.py
-          common.py
+          painter_presence.py                (rewritten: from .common / .colors / .pypresence)
+          common.py                           (rewritten: from .pypresence)
           colors/
             __init__.py
             color_find.py
@@ -123,10 +235,12 @@ def _bundle_painter(pypresence_src: Path) -> None:
             Attribution.txt
           pypresence/
 
-    NOTE: Painter adds the plugin's own directory to sys.path on load, which is
-    why `from common import ...` and `from colors import ...` inside
-    painter_presence.py resolve to the siblings in this folder rather than
-    needing to be `from .common` / `from .colors`.
+    Why we rewrite: in practice Painter does NOT have the loaded plugin's
+    directory on sys.path by the time the module-level `from common import ...`
+    runs (the bootstrap inside painter_presence.py that prepends sys.path
+    runs AFTER those imports, so the bundled plugin used to fail to load).
+    Converting sibling imports to relative form makes the bundle resolve
+    purely against its own package structure.
     """
     src = REPO / "substance_painter_presence"
     if not (src / "painter_presence.py").exists():
@@ -134,9 +248,24 @@ def _bundle_painter(pypresence_src: Path) -> None:
         return
     dst = DIST / "substance_painter_presence"
     dst.mkdir(parents=True)
-    shutil.copy2(src / "painter_presence.py", dst / "painter_presence.py")
+    # __init__.py is just `from .painter_presence import *` — already relative.
     shutil.copy2(src / "__init__.py", dst / "__init__.py")
-    _drop_runtime(dst, pypresence_src, colors=True)
+    # painter_presence.py: rewrite three sibling-module names.
+    _write_rewritten(
+        src=src / "painter_presence.py",
+        dst=dst / "painter_presence.py",
+        modules=["common", "colors", "pypresence"],
+    )
+    # common.py: rewrite the pypresence imports.
+    _write_rewritten(
+        src=COMMON_SRC,
+        dst=dst / "common.py",
+        modules=["pypresence"],
+    )
+    # colors/ uses internal relative imports already — copy as-is.
+    shutil.copytree(COLOR_SRC, dst / "colors", ignore=IGNORE)
+    # pypresence/ is third-party — keep as-is.
+    shutil.copytree(pypresence_src, dst / "pypresence", ignore=IGNORE)
     print("[build] substance_painter_presence/")
 
 
@@ -145,16 +274,27 @@ def _bundle_krita(pypresence_src: Path) -> None:
         dist/krita_presence/                 (drop into pykrita/)
           krita_presence.desktop
           krita_presence/
-            __init__.py
-            krita_presence.py
-            common.py
-            colors/
+            __init__.py                     (unchanged: `from .krita_presence import *`)
+            krita_presence.py               (rewritten: `from .common`, `from .colors`)
+            colors/                          (sibling subpackage, copied as-is)
               __init__.py
               color_find.py
               palette.csv
               iscc-nbs.csv
               Attribution.txt
-            pypresence/
+            common/                          (subpackage with pypresence nested inside)
+              __init__.py                   (was common.py; PySide6 -> PyQt5,
+                                              `from .pypresence`)
+              pypresence/
+
+    Two host quirks the build compensates for here:
+      * Krita doesn't put the loaded plugin's directory on sys.path before
+        running its module-level imports, so the source's `from common ...`
+        and `from colors ...` would ModuleNotFoundError. Rewrite to relative
+        imports.
+      * Krita's bundled Python ships PyQt5 instead of PySide6, so common.py's
+        `from PySide6 import QtCore, QtWidgets` would also raise. Swap the
+        binding in the bundled copy of common.py.
     """
     src_root = REPO / "krita_presence"
     desktop = src_root / "krita_presence.desktop"
@@ -165,8 +305,18 @@ def _bundle_krita(pypresence_src: Path) -> None:
     dst_root = DIST / "krita_presence"
     dst_root.mkdir(parents=True)
     shutil.copy2(desktop, dst_root / "krita_presence.desktop")
-    shutil.copytree(package_src, dst_root / "krita_presence", ignore=IGNORE)
-    _drop_runtime(dst_root / "krita_presence", pypresence_src, colors=True)
+    pkg_dst = dst_root / "krita_presence"
+    shutil.copytree(package_src, pkg_dst, ignore=IGNORE)
+
+    # krita_presence.py: convert sibling-module imports to relative.
+    main_py = pkg_dst / "krita_presence.py"
+    _write_rewritten(main_py, main_py, modules=["common", "colors"])
+
+    # common/ subpackage with pypresence/ nested inside, retargeted to PyQt5.
+    _write_common_subpackage(pkg_dst, pypresence_src, qt_binding="PyQt5")
+
+    # colors/ uses internal relative imports already; copy as-is.
+    shutil.copytree(COLOR_SRC, pkg_dst / "colors", ignore=IGNORE)
     print("[build] krita_presence/")
 
 

@@ -153,10 +153,51 @@ def test_uninstall_settings_menu_removes_discord_menu(
 def test_uninstall_settings_menu_no_op_when_not_installed(
     real_main_window, menu_state_clean
 ):
-    """When menubar_item is None (never installed) the early-return path runs;
-    must not crash. Verified by simply not raising."""
+    """When the menu bar has no Discord menu, uninstall finds nothing and
+    returns without raising."""
     pp.SP_PLUGIN.menubar_item = None
     pp.sp_uninstall_settings_menu()  # no exception
+
+
+def test_uninstall_handles_stale_menubar_item_wrapper(
+    real_main_window, menu_state_clean
+):
+    """Regression for the Designer-reported runtime bug (same code shape
+    here): the host's plugin reload can leave SP_PLUGIN.menubar_item with a
+    destroyed C++ side ("Internal C++ object already deleted") while the
+    underlying QMenu remains in the menu bar.
+
+    We simulate that by installing the menu, deleting the C++ side of the
+    QMenu wrapper via shiboken6, and adding a fresh Discord menu directly to
+    the menu bar so the visible state matches what a user would see. The
+    uninstall must find and remove the Discord menu anyway, then clear
+    menubar_item to None — not raise or leave the menu in place."""
+    import shiboken6
+
+    pp.sp_install_settings_menu()
+    assert "Discord" in [a.text() for a in real_main_window.menuBar().actions()]
+    stale_menu = pp.SP_PLUGIN.menubar_item
+    fresh_menu = real_main_window.menuBar().addMenu("Discord")
+    pp.SP_PLUGIN.menubar_item = stale_menu
+    shiboken6.delete(stale_menu)
+    with pytest.raises(RuntimeError):
+        stale_menu.menuAction()
+    pp.sp_uninstall_settings_menu()
+    assert "Discord" not in [a.text() for a in real_main_window.menuBar().actions()]
+    assert pp.SP_PLUGIN.menubar_item is None
+    del fresh_menu
+
+
+def test_install_strips_preexisting_discord_menu(real_main_window, menu_state_clean):
+    """If a previous failed uninstall left a Discord menu in the bar, a
+    subsequent install must not stack a second one on top — it should
+    remove the stale entry first."""
+    real_main_window.menuBar().addMenu("Discord")
+    pp.sp_install_settings_menu()
+    discord_actions = [
+        a for a in real_main_window.menuBar().actions() if a.text() == "Discord"
+    ]
+    assert len(discord_actions) == 1
 
 
 def test_uninstall_closes_open_settings_window(real_main_window, menu_state_clean):

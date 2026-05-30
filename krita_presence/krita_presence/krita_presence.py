@@ -4,10 +4,8 @@ Krita 5.3.1 (git 9069dbc). For more info, see https://github.com/MarlArini/dcc-r
 """
 
 from dataclasses import dataclass, fields
-import os
 from pathlib import Path
 import re
-import sys
 import time
 from typing import cast, ClassVar, List, Tuple, Dict, Callable, Any, get_type_hints
 import xml.etree.ElementTree as ET
@@ -22,12 +20,6 @@ import krita as kr  # pyright: ignore[reportMissingImports]
 from common import SharedSettings, RPCBasePlugin, QtSettingsGUIMenu, ColoredIconSettings
 from common import plural as kp_plural
 from colors import find_closest as kp_find_closest_color
-
-# Bootstrap: ensure this plugin's directory is on sys.path so the sibling
-# common.py and pypresence/ resolve when loaded by the host application.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
 
 # Identifier for the one Krita tool we have per-color icon variants for.
 # Other brush-family tools (Multibrush, Dynamic, etc.) fall back to their
@@ -147,6 +139,7 @@ class IdleDetector(qc.QObject):
     incrementing a count when the file is open during an RPC tick. We monitor ourselves
     to see if a user becomes idle so the count can stop incrementing, capturing input
     events and updating a timer."""
+
     def __init__(self, threshold_seconds=180):
         super().__init__()
         self._last_input = time.time()
@@ -190,14 +183,14 @@ class KPContext:
 
     def active_document_name(self) -> str | None:
         name = cast(kr.Document, self.doc).name()
-        if name is None: # name comes from document metadata: only exists on .kra files
-            name = cast(kr.Document, self.doc).fileName() # try file name instead
+        if name is None:  # name comes from document metadata: only exists on .kra files
+            name = cast(kr.Document, self.doc).fileName()  # try file name instead
             if not name:
                 return None
             return Path(name).name
         if name == "Unnamed":
             return "Unsaved document"
-        return f"{name}.kra" # Document.name() does not include the .kra extension
+        return f"{name}.kra"  # Document.name() does not include the .kra extension
 
     def num_documents(self) -> str:
         num_docs = len(cast(kr.Krita, self.instance).documents())
@@ -228,7 +221,7 @@ class KPContext:
         if al_descendants == 0:
             if "layer" in al_name.lower():
                 return al_name
-            return f"Layer {al_name}"
+            return f"Layer: {al_name}"
         return f"{al_name} ({kp_plural(al_descendants, 'sublayer')})"
 
     # From KnowZero on the Krita Forums: https://krita-artists.org/t/active-tool-request/78904
@@ -397,7 +390,7 @@ class KPPlugin(RPCBasePlugin):
         else:
             try:
                 self.doc_times[id(doc)] = int(doc_time.text)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 self.doc_times[id(doc)] = 0
 
     def update_small_icon(self, ctx: KPContext):  # pylint: disable=unused-argument

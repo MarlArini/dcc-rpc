@@ -164,9 +164,60 @@ def test_uninstall_settings_menu_removes_discord_menu(
 
 
 def test_uninstall_no_op_when_not_installed(real_main_window, menu_state_clean):
-    """When menubar_item is None the early return triggers; no crash."""
+    """When the menu bar has no Discord menu, uninstall finds nothing and
+    returns without raising."""
     SP_PLUGIN.menubar_item = None
     sp_uninstall_settings_menu()  # no exception
+
+
+def test_uninstall_handles_stale_menubar_item_wrapper(
+    real_main_window, menu_state_clean
+):
+    """Regression for the runtime bug: Designer's plugin reload can leave
+    SP_PLUGIN.menubar_item with a destroyed C++ side ("Internal C++ object
+    already deleted") while the underlying QMenu remains in the menu bar.
+
+    We simulate that by installing the menu, deleting the C++ side of the
+    QMenu wrapper via shiboken6, and forcing SP_PLUGIN.menubar_item to a
+    fresh-but-stale wrapper that mirrors the post-reload state. The
+    uninstall must find and remove the Discord menu anyway, then clear
+    menubar_item to None — not raise."""
+    import shiboken6
+
+    sp_install_settings_menu()
+    assert "Discord" in [a.text() for a in real_main_window.menuBar().actions()]
+    # Re-add a second Discord menu to mimic the "menu still in bar, wrapper
+    # stale" condition: we delete the C++ side of the cached wrapper and add
+    # a new Discord menu directly to the menu bar so the visible state
+    # matches what the user reported.
+    stale_menu = SP_PLUGIN.menubar_item
+    fresh_menu = real_main_window.menuBar().addMenu("Discord")
+    SP_PLUGIN.menubar_item = stale_menu
+    shiboken6.delete(stale_menu)
+    # Sanity: accessing the stale wrapper now raises (confirms our setup).
+    with pytest.raises(RuntimeError):
+        stale_menu.menuAction()
+    sp_uninstall_settings_menu()
+    # Both Discord menus should be gone — the walk-by-title removes any
+    # Discord submenu it finds. menubar_item is reset for future installs.
+    assert "Discord" not in [a.text() for a in real_main_window.menuBar().actions()]
+    assert SP_PLUGIN.menubar_item is None
+    # Keep fresh_menu alive through the assertion above so the menu bar
+    # still has a real reference until removal.
+    del fresh_menu
+
+
+def test_install_strips_preexisting_discord_menu(real_main_window, menu_state_clean):
+    """If a previous failed uninstall left a Discord menu in the bar, a
+    subsequent install must not stack a second one on top — it should
+    remove the stale entry first."""
+    # Manually inject a "pre-existing" Discord menu, then run install.
+    real_main_window.menuBar().addMenu("Discord")
+    sp_install_settings_menu()
+    discord_actions = [
+        a for a in real_main_window.menuBar().actions() if a.text() == "Discord"
+    ]
+    assert len(discord_actions) == 1
 
 
 # ---------------------------------------------------------------------------
