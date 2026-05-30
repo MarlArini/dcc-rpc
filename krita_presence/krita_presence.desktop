@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=krita_presence
+X-Python-2-Compatible=false
+Name=Krita Presence
+Comment=Discord Rich Presence for Krita

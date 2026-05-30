@@ -1,0 +1,22 @@
+Color name attributions
+=======================
+
+The dcc-rpc plugins display a color name when the user paints with a brush.
+Two name sources are bundled. Per their licenses / public-domain status,
+neither requires distribution of the underlying license text, but linking
+the upstream source is the polite thing to do and so it is preserved here.
+
+Evocative color names (palette.csv)
+-----------------------------------
+Source:  meodai/color-names
+URL:     https://github.com/meodai/color-names
+The "best of" CSV (colornames.bestof.csv) is the upstream curated subset.
+
+ISCC-NBS centroid color names (iscc-nbs.csv)
+--------------------------------------------
+Source:  W3Schools
+URL:     https://www.w3schools.com/colors/colors_nbs.asp
+The underlying naming system is the ISCC-NBS Centroid Color Chart developed
+by the Inter-Society Color Council and the U.S. National Bureau of Standards
+(now NIST). Names and centroid colors are in the public domain in the United
+States as a U.S. Government work.

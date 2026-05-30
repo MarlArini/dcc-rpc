@@ -1,0 +1,5 @@
+[MAIN]
+init-hook='import sys; sys.path.insert(0, ".")'
+
+[MESSAGES CONTROL]
+disable=missing-function-docstring,missing-class-docstring,global-statement,broad-exception-caught,c-extension-no-member

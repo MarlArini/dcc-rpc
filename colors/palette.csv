@@ -1,0 +1,251 @@
+index,key_suffix,name,display_name,hex,L,a,b
+0,c000,Black Hole,Black Hole,#010203,0.082309,-0.003926,-0.007011
+1,c001,Glossy Black,Glossy Black,#110011,0.124644,0.048773,-0.030049
+2,c002,Cosmic Bit Flip,Cosmic Bit Flip Black,#001000,0.149931,-0.040472,0.031061
+3,c003,Dwarf Fortress,Dwarf Fortress Brown,#1d0200,0.151133,0.044516,0.030397
+4,c004,Oblivion,Oblivion Blue,#000435,0.159805,-0.009806,-0.095048
+5,c005,Dreamless Sleep,Dreamless Sleep Gray,#111111,0.177638,0.000000,0.000000
+6,c006,Your Darkness,Your Darkness Purple,#220044,0.211967,0.055065,-0.099615
+7,c007,Vienna Roast,Vienna Roast Magenta,#330022,0.213756,0.087826,-0.022641
+8,c008,Shadow Play,Shadow Play Brown,#2d1403,0.224108,0.029497,0.040313
+9,c009,Alone in the Dark,Alone in the Dark Blue,#000066,0.230653,-0.016562,-0.158966
+10,c010,Midnight Dreams,Midnight Dreams,#002233,0.237842,-0.028940,-0.041327
+11,c011,Ink Black,Ink Black,#252024,0.250793,0.009332,-0.004834
+12,c012,Lindworm Green,Lindworm Green,#172808,0.253245,-0.039208,0.042259
+13,c013,Azulado,Azulado Blue,#211d49,0.262683,0.018642,-0.076885
+14,c014,Lonely Chocolate,Lonely Chocolate,#4a0a00,0.266867,0.080182,0.053657
+15,c015,Black Sea Night,Black Sea Night,#052462,0.285101,-0.016292,-0.114578
+16,c016,Clairvoyant,Clairvoyant Purple,#480656,0.297460,0.102323,-0.087869
+17,c017,Go to Hell Black,Go to Hell Black,#342c21,0.298418,0.005553,0.021528
+18,c018,Elite Teal,Elite Teal,#133337,0.299050,-0.034062,-0.016853
+19,c019,Orbital Kingdom,Orbital Kingdom Blue,#220088,0.300350,0.019837,-0.186094
+20,c020,Castro,Castro Brown,#44232f,0.304477,0.052864,-0.002320
+21,c021,Wasabi Nori,Wasabi Nori,#333300,0.310812,-0.022916,0.063759
+22,c022,Purple Noir,Purple Noir,#322c56,0.321603,0.022738,-0.069431
+23,c023,Explorer of the Galaxies,Explorer of the Galaxies Purple,#3a1f76,0.332459,0.050114,-0.129789
+24,c024,Bohemian Blue,Bohemian Blue,#0000aa,0.333595,-0.023954,-0.229914
+25,c025,Below the Surface,Below the Surface Blue,#0a2f7c,0.336013,-0.018048,-0.136032
+26,c026,Lost in the Woods,Lost in the Woods Green,#014426,0.340409,-0.074316,0.032153
+27,c027,Hellbound,Hellbound Red,#710101,0.345172,0.122957,0.068392
+28,c028,Poseidon,Poseidon Blue,#143c5d,0.345729,-0.028509,-0.067138
+29,c029,Batch Brew,Batch Brew Gray,#45392f,0.354264,0.011287,0.020997
+30,c030,Space Battle Blue,Space Battle Blue,#440099,0.355002,0.070641,-0.187153
+31,c031,Count Chocula,Count Chocula Brown,#5e2d10,0.357660,0.054722,0.061090
+32,c032,Shadow Purple,Shadow Purple,#4e334e,0.363582,0.048081,-0.031608
+33,c033,Mysterious Waters,Mysterious Waters Teal,#27454a,0.369106,-0.032106,-0.017936
+34,c034,Bordeaux,Bordeaux Red,#7b002c,0.372074,0.145923,0.028734
+35,c035,Alligator Gladiator,Alligator Gladiator Olive,#444411,0.375500,-0.023247,0.066194
+36,c036,Velvet,Velvet Magenta,#750851,0.377377,0.148625,-0.034491
+37,c037,Siren,Siren Brown,#69293b,0.378076,0.093015,0.008317
+38,c038,Good Karma,Good Karma Blue,#333c76,0.379830,0.007080,-0.098415
+39,c039,Depths of Night,Depths of Night Blue,#2c319b,0.384858,0.009394,-0.168216
+40,c040,Extraviolet,Extraviolet,#661188,0.392594,0.123443,-0.132165
+41,c041,Imperial,Imperial Purple,#602f6b,0.395764,0.085312,-0.071548
+42,c042,Duck Hunt,Duck Hunt Green,#005800,0.398905,-0.107681,0.082640
+43,c043,Busty Blue,Busty Blue,#3300cc,0.401688,0.019664,-0.252803
+44,c044,Cape Verde,Cape Verde Teal,#01554f,0.404806,-0.070010,-0.008061
+45,c045,Hōjicha,Hōjicha Green,#424f3b,0.410017,-0.025665,0.025885
+46,c046,Caponata,Caponata Brown,#822a10,0.414751,0.101997,0.074830
+47,c047,Brunette,Brunette Brown,#664238,0.417656,0.042911,0.031420
+48,c048,Olympian Blue,Olympian Blue,#1c4c8c,0.420390,-0.026769,-0.115102
+49,c049,Night Kite,Night Kite Teal,#005572,0.420929,-0.053940,-0.064183
+50,c050,Hyperlink Blue,Hyperlink Blue,#0000ee,0.429015,-0.030806,-0.295677
+51,c051,Grape Fizz,Grape Fizz,#64435f,0.430271,0.054667,-0.029015
+52,c052,Succubus,Succubus Red,#990022,0.431673,0.162074,0.062228
+53,c053,Mulberry,Mulberry,#920a4e,0.432111,0.169443,-0.002573
+54,c054,Galaxy Express,Galaxy Express Blue,#444499,0.434812,0.021576,-0.133710
+55,c055,Royal Purpleness,Royal Purpleness,#881177,0.435794,0.164967,-0.075604
+56,c056,Once in a Blue Moon,Once in a Blue Moon,#0044bb,0.437172,-0.028717,-0.194227
+57,c057,Sea Serpent’s Tears,Sea Serpent’s Tears Blue,#5511cc,0.437265,0.070371,-0.232016
+58,c058,Midori,Midori Green,#2a603b,0.441578,-0.073947,0.039676
+59,c059,Tangent Periwinkle,Tangent Periwinkle Blue,#50507f,0.452384,0.017036,-0.074197
+60,c060,Ayahuasca Vine,Ayahuasca Vine Olive,#665500,0.453088,-0.009058,0.092688
+61,c061,Woodland Night,Woodland Night Teal,#475c5d,0.457886,-0.024030,-0.008705
+62,c062,Bruise,Bruise Magenta,#7e4071,0.466728,0.097975,-0.044463
+63,c063,Poppy Pompadour,Poppy Pompadour Purple,#6b3fa0,0.468541,0.079995,-0.129516
+64,c064,Hyper Blue,Hyper Blue,#015f97,0.468842,-0.049847,-0.106014
+65,c065,Royal Nightcore,Royal Nightcore Blue,#533cc6,0.470955,0.045491,-0.197416
+66,c066,Liaison,Liaison Red,#8c3f52,0.473693,0.105578,0.012065
+67,c067,Overdue Blue,Overdue Blue,#4400ff,0.476421,0.025778,-0.298453
+68,c068,Violet Poison,Violet Poison,#8601bf,0.478814,0.155175,-0.185343
+69,c069,Teal With It,Teal With It,#01697a,0.478930,-0.069628,-0.046811
+70,c070,Brownstone,Brownstone,#785441,0.479643,0.037227,0.042474
+71,c071,Forest Empress,Forest Empress Green,#3d7016,0.490803,-0.092443,0.092290
+72,c072,Voluptuous Violet,Voluptuous Violet,#7711dd,0.491593,0.116786,-0.230908
+73,c073,Brownie,Brownie,#964b00,0.496742,0.071365,0.100742
+74,c074,Plastic Lips,Plastic Lips Red,#aa2266,0.497689,0.178813,-0.012838
+75,c075,Desirable,Desirable Red,#a93435,0.499719,0.139651,0.062557
+76,c076,Frosted Blueberries,Frosted Blueberries,#0055dd,0.501259,-0.033621,-0.216266
+77,c077,Tropical Rainforest,Tropical Rainforest Green,#00755e,0.501261,-0.095709,0.012174
+78,c078,Himalaya,Himalaya Olive,#736330,0.503588,-0.002835,0.072679
+79,c079,Electric Indigo,Electric Indigo,#6600ff,0.503830,0.077860,-0.283145
+80,c080,Dr Who,Dr Who Purple,#78587d,0.507311,0.054308,-0.042623
+81,c081,Purple Ink,Purple Ink,#9a2ca0,0.507874,0.161963,-0.110321
+82,c082,Rural Red,Rural Red,#bb1144,0.509784,0.190784,0.045284
+83,c083,Magic Ink,Magic Ink Blue,#0247fe,0.510198,-0.030280,-0.270884
+84,c084,Starstruck,Starstruck Blue,#4664a5,0.511291,-0.011097,-0.108898
+85,c085,Purple Rain,Purple Rain,#7442c8,0.512124,0.085602,-0.177340
+86,c086,Threatening Red,Threatening Red,#c30305,0.514126,0.183465,0.101265
+87,c087,Prophet Violet,Prophet Violet,#6f58a6,0.519078,0.052049,-0.109298
+88,c088,Archaeology,Archaeology Gray,#6e6a5e,0.524292,-0.000557,0.018964
+89,c089,Shipyard,Shipyard Blue,#4f6f85,0.525748,-0.026145,-0.043499
+90,c090,Vibrant Velvet,Vibrant Velvet Magenta,#bb0088,0.528009,0.216874,-0.058233
+91,c091,Plum Passion,Plum Passion,#9b4b80,0.529982,0.118937,-0.038877
+92,c092,Savoy Blue,Savoy Blue,#4b61d1,0.537452,0.003160,-0.173691
+93,c093,French Blue,French Blue,#0072bb,0.537514,-0.054989,-0.131050
+94,c094,Ferocious Fuchsia,Ferocious Fuchsia,#aa00cc,0.541069,0.196350,-0.172623
+95,c095,Cosmic Heart,Cosmic Heart Purple,#9601f4,0.546331,0.156436,-0.239771
+96,c096,Jungle Look,Jungle Look Yellow,#727736,0.550257,-0.034391,0.081364
+97,c097,Embarrassed Frog,Embarrassed Frog Orange,#996611,0.551521,0.032689,0.107054
+98,c098,Bureaucracy,Bureaucracy Purple,#746c8f,0.551708,0.023030,-0.049303
+99,c099,Cheek Red,Cheek Red,#a55a55,0.554015,0.090124,0.041602
+100,c100,Emerald Whispers,Emerald Whispers,#2b8478,0.557867,-0.084968,-0.003720
+101,c101,Mauve It,Mauve It,#bb4466,0.559008,0.154425,0.016415
+102,c102,Ahoy! Blue,Ahoy! Blue,#0082a1,0.562508,-0.077059,-0.070099
+103,c103,Maniac Green,Maniac Green,#009000,0.566089,-0.152811,0.117276
+104,c104,Bluerocratic,Bluerocratic,#1f66ff,0.567285,-0.030222,-0.235731
+105,c105,Bloodhound,Bloodhound Orange,#bb5511,0.569234,0.101388,0.110122
+106,c106,Lusty Lavender,Lusty Lavender,#8d5eb7,0.569964,0.083954,-0.111912
+107,c107,Candy Grape Fizz,Candy Grape Fizz,#7755ee,0.571335,0.066063,-0.208113
+108,c108,Fruit of Passion,Fruit of Passion Magenta,#946985,0.574110,0.063356,-0.022788
+109,c109,Rubylicious,Rubylicious,#db1459,0.574785,0.218579,0.040242
+110,c110,Halloween Punch,Halloween Punch Red,#dd2211,0.575296,0.190354,0.110312
+111,c111,Clouded Pine,Clouded Pine,#628468,0.579284,-0.049571,0.029011
+112,c112,Mystifying Magenta,Mystifying Magenta,#c920b0,0.581636,0.219084,-0.099435
+113,c113,Viridian,Viridian,#1e9167,0.584765,-0.112728,0.034741
+114,c114,Flood,Flood Blue,#6677bb,0.585263,0.003912,-0.106342
+115,c115,Whisky Barrel,Whisky Barrel,#96745b,0.585845,0.030054,0.047541
+116,c116,Magenta Memoir,Magenta Memoir,#b4559b,0.589821,0.139004,-0.054857
+117,c117,Benevolent Pink,Benevolent Pink,#dd1188,0.591501,0.236268,-0.026175
+118,c118,Magenta Affair,Magenta Affair,#aa44dd,0.592214,0.152695,-0.169563
+119,c119,Asparagus Sultan,Asparagus Sultan,#6a8e22,0.598726,-0.082678,0.111116
+120,c120,Way Beyond the Blue,Way Beyond the Blue,#1188cc,0.601193,-0.064585,-0.123486
+121,c121,Mt. Rushmore,Mt. Rushmore Gray,#7f8181,0.601541,-0.002293,-0.000705
+122,c122,Horror Snob,Horror Snob Red,#d34d4d,0.602129,0.155205,0.068138
+123,c123,Spectacular Purple,Spectacular Purple,#bb02fe,0.603427,0.201728,-0.223752
+124,c124,Blue Öyster Cult,Blue Öyster Cult,#5577ee,0.606359,-0.004830,-0.182730
+125,c125,Hamtaro Brown,Hamtaro Brown,#b07426,0.608670,0.042829,0.109229
+126,c126,Twinkly Pinkily,Twinkly Pinkily,#cf4796,0.609426,0.184704,-0.038254
+127,c127,Aster,Aster Purple,#867ba9,0.609979,0.029723,-0.063091
+128,c128,Java,Java Cyan,#259797,0.616696,-0.093153,-0.024862
+129,c129,Malevolent Mauve,Malevolent Mauve,#bb6688,0.617261,0.115093,-0.008806
+130,c130,Morocco,Morocco Red,#b67267,0.622032,0.076816,0.043913
+131,c131,Love Priestess,Love Priestess Purple,#bb55cc,0.622957,0.154138,-0.121621
+132,c132,Marinara Red,Marinara Red,#ff0008,0.628155,0.225570,0.123972
+133,c133,Greek Olive,Greek Olive,#a08650,0.631865,0.007534,0.078479
+134,c134,Too Blue to Be True,Too Blue to Be True,#0088ff,0.632054,-0.055322,-0.194056
+135,c135,Drunk-Tank Pink,Drunk-Tank Pink,#dd11dd,0.632885,0.242735,-0.149799
+136,c136,Violet Voltage,Violet Voltage,#a669db,0.634614,0.103677,-0.138344
+137,c137,Hot Caramel,Hot Caramel,#cc6e3b,0.636458,0.091939,0.099497
+138,c138,Flaming Hot Flamingoes,Flaming Hot Flamingoes Red,#ff005d,0.636873,0.247806,0.058019
+139,c139,Mosslands,Mosslands,#779966,0.643956,-0.058908,0.057768
+140,c140,Lipstick Illusion,Lipstick Illusion Red,#d4696d,0.648001,0.127391,0.044472
+141,c141,Fluorescent Pink,Fluorescent Pink,#fe1493,0.653218,0.260311,-0.014732
+142,c142,Wisteria,Wisteria Purple,#a87dc2,0.657185,0.073799,-0.081685
+143,c143,Yoshi,Yoshi Green,#55aa00,0.658132,-0.138684,0.135945
+144,c144,Orchid,Orchid Blue,#7a81ff,0.658974,0.024591,-0.181902
+145,c145,Papyrus,Papyrus Yellow,#999911,0.661480,-0.047261,0.132062
+146,c146,Canadian Tuxedo,Canadian Tuxedo Blue,#579aca,0.661541,-0.047229,-0.087165
+147,c147,Lick and Kiss,Lick and Kiss Red,#ee5577,0.662335,0.185491,0.034480
+148,c148,Prometheus Orange,Prometheus Orange,#f4581e,0.662578,0.158606,0.124903
+149,c149,Brutal Pink,Brutal Pink,#ff00bb,0.666725,0.273838,-0.073883
+150,c150,Hobgoblin,Hobgoblin Green,#01ad8f,0.667217,-0.125742,0.012354
+151,c151,Blood Burst,Blood Burst Red,#ff474c,0.667252,0.200600,0.089903
+152,c152,Punched Pink,Punched Pink,#b68692,0.670212,0.060803,0.002481
+153,c153,Bakery Brown,Bakery Brown,#ab9078,0.671589,0.021012,0.042194
+154,c154,Japanese Bonsai,Japanese Bonsai Green,#829f96,0.677720,-0.034745,0.003398
+155,c155,Polar Glow,Polar Glow Blue,#5097fc,0.678434,-0.035861,-0.162160
+156,c156,Barbiecore,Barbiecore Magenta,#e15acb,0.678648,0.189606,-0.090323
+157,c157,Green Mana,Green Mana,#26b467,0.679903,-0.144852,0.072094
+158,c158,Perrywinkle,Perrywinkle Blue,#8f8ce7,0.680919,0.031584,-0.128586
+159,c159,End of Summer,End of Summer Yellow,#cc8f15,0.692937,0.030958,0.136769
+160,c160,Gameboy Screen,Gameboy Screen Green,#8bac0f,0.694754,-0.089320,0.140149
+161,c161,Flaming Flamingo,Flaming Flamingo Purple,#dd55ff,0.695395,0.193630,-0.168776
+162,c162,Barbara,Barbara Magenta,#ff0ff3,0.696956,0.272930,-0.151456
+163,c163,Enchanted Lilac,Enchanted Lilac,#a893c1,0.697811,0.040584,-0.057047
+164,c164,Island Coral,Island Coral,#d8877a,0.704574,0.088747,0.050653
+165,c165,Fake Love,Fake Love Purple,#cc77ee,0.707283,0.132633,-0.130171
+166,c166,Soon to Be Hay,Soon to Be Hay,#7bb369,0.709668,-0.088724,0.078857
+167,c167,Begonia,Begonia Red,#fa6e79,0.711083,0.163201,0.052291
+168,c168,High Tide,High Tide Blue,#85a6c8,0.712762,-0.021674,-0.057874
+169,c169,Glassmith,Glassmith Cyan,#46b5c0,0.714656,-0.091237,-0.041334
+170,c170,Pickled,Pickled Yellow,#b3a74b,0.720028,-0.023610,0.111690
+171,c171,À l’Orange,À l’Orange,#f2850d,0.722345,0.090728,0.144362
+172,c172,Taupe,Taupe,#b9a281,0.723975,0.012192,0.051415
+173,c173,Mangala Pink,Mangala Pink,#e781a6,0.724736,0.131406,-0.005132
+174,c174,Melon,Melon Red,#ff7855,0.725628,0.140299,0.100497
+175,c175,Zunda Green,Zunda Green,#6bc026,0.726074,-0.139687,0.139860
+176,c176,Kisses,Kisses Magenta,#ff66bb,0.727259,0.200987,-0.039195
+177,c177,Pink Party,Pink Party,#ff55ee,0.731509,0.229404,-0.121083
+178,c178,Tunic Green,Tunic Green,#00cc00,0.732334,-0.197687,0.151716
+179,c179,Foggy Plum,Foggy Plum,#b7a5ad,0.739788,0.023164,-0.004513
+180,c180,Froggy Pond,Froggy Pond Green,#7fba9e,0.740347,-0.070647,0.021037
+181,c181,Exotic Lilac,Exotic Lilac,#d198b5,0.742776,0.075884,-0.017197
+182,c182,Hawaii Morning,Hawaii Morning Cyan,#00bbff,0.746106,-0.091994,-0.125605
+183,c183,Coffee Whip,Coffee Whip Orange,#df9d5b,0.746811,0.049228,0.103168
+184,c184,Kitten’s Eye,Kitten’s Eye Blue,#8aadf7,0.751133,-0.011054,-0.113583
+185,c185,Leafy Woodland,Leafy Woodland,#aabb11,0.753093,-0.074742,0.151906
+186,c186,Indian Mesa,Indian Mesa Pink,#d5a193,0.753912,0.053206,0.038074
+187,c187,Tulip,Tulip Pink,#ff878d,0.757619,0.138490,0.045023
+188,c188,Enchanted Lavender,Enchanted Lavender,#bfa3d9,0.758460,0.050346,-0.064277
+189,c189,Pristine Oceanic,Pristine Oceanic,#00ccbb,0.759609,-0.133930,-0.010142
+190,c190,Juvie,Juvie Cyan,#8abbd0,0.764756,-0.041258,-0.043138
+191,c191,Avant-Garde Pink,Avant-Garde Pink,#ff77ee,0.768072,0.189613,-0.098946
+192,c192,Pistachio,Pistachio Green,#93c572,0.768568,-0.085660,0.089071
+193,c193,Pastel Orange,Pastel Orange,#ff964f,0.771056,0.092750,0.120721
+194,c194,Savannah Grass,Savannah Grass,#babc72,0.776762,-0.032577,0.090577
+195,c195,Love Dust,Love Dust Magenta,#eb94da,0.777136,0.122755,-0.059282
+196,c196,Diva,Diva Purple,#c9a0ff,0.778352,0.075582,-0.115494
+197,c197,Mad for Mango,Mad for Mango,#f8a200,0.779093,0.052920,0.158646
+198,c198,Envy’s Love,Envy’s Love Green,#2dd78d,0.779245,-0.158467,0.062737
+199,c199,Gold Tooth,Gold Tooth,#dbb40c,0.781856,-0.008011,0.158134
+200,c200,Limonana,Limonana Green,#11dd66,0.785067,-0.186133,0.109498
+201,c201,Creamy Peach,Creamy Peach,#f4a384,0.788012,0.079035,0.070460
+202,c202,Animal Kingdom,Animal Kingdom Yellow,#bcc09e,0.795630,-0.018124,0.042883
+203,c203,Roseate Spoonbill,Roseate Spoonbill,#e0adc4,0.800754,0.065383,-0.011635
+204,c204,King Lizard,King Lizard Green,#77dd22,0.803966,-0.160921,0.159209
+205,c205,Prosciutto,Prosciutto Orange,#e0b4a4,0.804989,0.042342,0.036723
+206,c206,Purple Illusion,Purple Illusion,#b8b8f8,0.805341,0.022075,-0.087255
+207,c207,Strawberry Frappé,Strawberry Frappé,#ffa2aa,0.807313,0.107380,0.027257
+208,c208,Enchanted Emerald,Enchanted Emerald,#7ed89a,0.809479,-0.110262,0.056659
+209,c209,Water Nymph,Water Nymph Cyan,#81d0df,0.811942,-0.068919,-0.041352
+210,c210,Crisps,Crisps Yellow,#e2bd67,0.813188,0.006873,0.113169
+211,c211,Plein Air,Plein Air Gray,#b9c4d2,0.816135,-0.006215,-0.022284
+212,c212,Golden Harvest,Golden Harvest,#cccc11,0.818417,-0.059350,0.165505
+213,c213,Cabbage,Cabbage Green,#87d7be,0.820409,-0.086118,0.011761
+214,c214,Apricot,Apricot,#ffb16d,0.821380,0.060635,0.108600
+215,c215,Clear Sky,Clear Sky,#8eccfe,0.821546,-0.042263,-0.085205
+216,c216,Satin Lime,Satin Lime,#33ee00,0.826590,-0.213989,0.171150
+217,c217,Vaporwave Blue,Vaporwave Blue,#22ddff,0.827405,-0.116334,-0.080435
+218,c218,Wasabi,Wasabi,#afd77f,0.830136,-0.076802,0.095752
+219,c219,Beloved Sunflower,Beloved Sunflower Yellow,#ffba24,0.831677,0.028092,0.162346
+220,c220,Fake Jade,Fake Jade,#13eac9,0.838894,-0.153130,0.006977
+221,c221,Jigglypuff,Jigglypuff Magenta,#ffaaff,0.847892,0.122200,-0.080061
+222,c222,Bitter Melon,Bitter Melon Yellow,#cfd1b2,0.850936,-0.014467,0.039160
+223,c223,Candy Bar,Candy Bar Pink,#ffb7d5,0.854865,0.090299,-0.011914
+224,c224,Innocent Snowdrop,Innocent Snowdrop,#d0c7ff,0.855661,0.029135,-0.071963
+225,c225,Shrimp Toast,Shrimp Toast Orange,#f7c5a0,0.858665,0.039943,0.063998
+226,c226,Herbivore,Herbivore Green,#88ee77,0.860363,-0.142402,0.115788
+227,c227,Sour Green,Sour Green,#c1e613,0.867435,-0.104929,0.175942
+228,c228,Hyperpop Green,Hyperpop Green,#17f9a6,0.867666,-0.182090,0.066686
+229,c229,Mamba Yellow,Mamba Yellow,#fdd014,0.871328,-0.008201,0.175504
+230,c230,Ephemeral Red,Ephemeral Red,#e4cfd7,0.874055,0.025407,-0.003321
+231,c231,Gatsby Glitter,Gatsby Glitter Yellow,#eed683,0.878136,-0.007044,0.106179
+232,c232,Break the Ice,Break the Ice,#b2e1ee,0.880994,-0.041598,-0.030770
+233,c233,Venomous Green,Venomous Green,#66ff22,0.882154,-0.203547,0.176789
+234,c234,Glaucous Green,Glaucous Green,#b3e8c2,0.884095,-0.067437,0.033628
+235,c235,Venomous Sting,Venomous Sting Green,#c6ec7a,0.891693,-0.083603,0.121580
+236,c236,Master Sword Blue,Master Sword Blue,#00ffee,0.899926,-0.156719,-0.017168
+237,c237,Sugar Chic,Sugar Chic Magenta,#ffccff,0.905121,0.072720,-0.048553
+238,c238,Frost,Frost,#e1e4c5,0.908433,-0.015246,0.038301
+239,c239,Pika Yellow,Pika Yellow,#eee92d,0.909226,-0.057470,0.177508
+240,c240,Creamy Mint,Creamy Mint,#aaffaa,0.924983,-0.114205,0.081960
+241,c241,Pink Glitter,Pink Glitter,#fddfda,0.926961,0.029760,0.016497
+242,c242,Liquid Neon,Liquid Neon Green,#c8ff00,0.928119,-0.128742,0.191023
+243,c243,Blister Pearl,Blister Pearl,#aaffee,0.941039,-0.085700,-0.000562
+244,c244,Spätzle Yellow,Spätzle Yellow,#ffee88,0.941661,-0.021648,0.122579
+245,c245,Foundation White,Foundation White,#efeeff,0.954872,0.007276,-0.021536
+246,c246,Lime Mist,Lime Mist,#ddffaa,0.955992,-0.067505,0.092266
+247,c247,Bat-Signal,Bat-Signal Yellow,#feff00,0.967180,-0.072459,0.198417
+248,c248,Ice,Ice,#d6fffa,0.969851,-0.042122,-0.005517
+249,c249,Matt White,Matt White,#ffffd4,0.989249,-0.016553,0.052913

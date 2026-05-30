@@ -1,0 +1,508 @@
+"""
+NukePresence is a Discord Rich Presence client plugin for The Foundry's Nuke,
+NukeX, and NukeStudio. NukePresence has been tested on Nuke[s] 17.0.1.
+For more info, see https://github.com/MarlArini/dcc-rpc.
+"""
+
+import atexit
+from dataclasses import dataclass, field
+import os
+from pathlib import Path
+import sys
+import threading
+from typing import Tuple, ClassVar, List
+from PySide6 import QtWidgets as QtW
+from pypresence.presence import Presence
+
+# pylint: disable=import-error
+import nuke  # pyright: ignore[reportMissingImports]
+
+# pylint: enable=import-error
+from common import SharedSettings, SessionInfo, RPCUpdateDetails, JSONSharedSettings
+from common import (
+    on_render_end,
+    on_frame_render_end,
+    get_file_size_str,
+    force_clear_on_exit,
+    plural as nk_plural,
+)
+from common import push_rpc_update, update_buttons, on_render_start, connect_rpc
+from common import advance_cycle, update_slot, QtSettingsGUIMenu
+
+# Bootstrap: ensure this plugin's directory is on sys.path so the sibling
+# common.py and pypresence/ resolve when loaded by the host application.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+###########
+# Globals #
+###########
+
+
+@dataclass
+class NKSettings(SharedSettings, JSONSharedSettings):
+    # pylint: disable=invalid-name
+    _PREFIX: ClassVar[str] = "nukePresence_"
+    INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
+        ("Memory usage", "memory_usage"),
+        ("Node count", "num_nodes"),
+        ("Active node", "active_node"),
+        ("Read/write node count", "io_nodes"),
+        ("Layer count", "num_layers"),
+        ("Viewer info", "viewer_info"),
+        ("Color management", "color_management"),
+        ("Comp name", "comp_name"),
+        ("Format", "format"),
+        ("Proxy info", "scaling"),
+    ]
+    _INITIAL_DEFAULTS = {"detailsType": "comp_name", "stateType": "num_nodes"}
+    displayRenderStats: bool = field(
+        default=True,
+        metadata={"group": "Details", "label": "Display render stats in details"},
+    )
+    displayFrames: bool = field(
+        default=True,
+        metadata={"group": "Details", "label": "Display frames rendered in details"},
+    )
+    disableNodeQueries: bool = field(
+        default=False,
+        metadata={"group": "General", "label": "Disable querying nodes"},
+    )
+    disableUpscaledNodes: bool = field(
+        default=False,
+        metadata={
+            "group": "Icons",
+            "label": "Do not use upscaled (linear filtering) icons, only SVG-rendered ones",
+        },
+    )
+
+
+# pylint: disable=line-too-long
+# fmt:off
+NK_HD_ICONS = [
+    '2D', '2DMasked', '3D', 'Add', 'Add32', 'AddMix', 'AdjBBox', 'Anaglyph', 'AppendClip', 'Assert', 'Axis', 
+    'Backdrop', 'Bezier', 'Bilateral', 'BlackOutside', 'Blend', 'Blur', 'BumpBoss', 'Camera', 'CameraShake', 
+    'Card', 'ChannelMerge', 'CheckerBoard', 'Clamp', 'CMSTestPattern', 'Color', 'Color3D', 'ColorBars', 
+    'ColorCorrect', 'ColorLookup', 'ColorMath', 'ColorSpace', 'ColorTransfer', 'ColorWheel', 'Constant', 
+    'ContactSheet', 'Convolve', 'Copy', 'CopyBBox', 'CopyRectangle', 'CornerPin', 'Crop', 'Crosstalk', 'Cube',
+    'CurveTool', 'Cylinder', 'Defocus', 'DegrainBlue', 'DegrainSimple', 'Difference', 'DirBlur', 'DirectLight', 
+    'Dissolve', 'Dither', 'Dot', 'DustBust', 'EdgeBlur', 'EdgeDetect', 'Emboss', 'EnvironMaps', 'Environment', 
+    'ErodeBlur', 'ErodeFast', 'Exposure', 'filter', 'FilterErode', 'Flare', 'FloodFill', 'Fog', 'FrameBlend', 
+    'FrameHold', 'FrameRange', 'GenerateLUT', 'Geometry', 'Glint', 'Glow', 'GodRays', 'Grade', 'Grain', 'Grid', 
+    'GridWarp', 'Group', 'HistEQ', 'Histogram', 'HSVTool', 'HueCorrect', 'HueKeyer', 'HueShift', 'IBKColour', 
+    'IBKGizmo', 'IDistort', 'Input', 'Invert', 'JoinViews', 'Keyer', 'KeyerLuminance', 'Keylight', 'Keymix', 
+    'Laplacian', 'LayerChannel', 'LayerContactSheet', 'LensDistort', 'LevelSet', 'Light', 'LightWrap', 'Log2Lin', 
+    'MarkerRemoval', 'Matrix', 'Median', 'Merge', 'MergeExpression', 'MinColor', 'Mirror', 'Modify', 'MotionBlur2D',
+    'MotionBlur3D', 'Noise', 'NoOp', 'NoTimeBlur', 'Oflow', 'OneView', 'Output', 'Paint', 'PointLight', 'PointsTo3D', 
+    'PointTo3D', 'Position', 'PostageStamp', 'Posterize', 'Premult', 'Primatte', 'Radial', 'Ramp', 'Read', 'ReadGeo', 
+    'Reconcile3D', 'Rectangle', 'Reformat', 'Remove', 'Remove32', 'Render', 'Retime', 'RolloffContrast', 'Sampler', 
+    'Saturation', 'ScannedGrain', 'Scene', 'Shader', 'Sharpen', 'Shuffle', 'ShuffleCopy', 'ShuffleViews', 'SideBySide',
+    'SoftClip', 'Soften', 'Spark', 'Sparkles', 'Sphere', 'SplineWarp', 'SplitAndJoin', 'SpotLight', 'Stabilize', 
+    'StickyNote', 'STMap', 'Switch', 'TemporalMedian', 'Text', 'Time', 'TimeBlur', 'TimeDissolve', 'TimeEcho', 
+    'TimeOffset', 'TimeWarp', 'Tracker', 'Transform', 'Truelight', 'TVIScale', 'Unpremult', 'VectorBlur', 
+    'Vectorfield', 'Viewer', 'VolumeRays', 'Write', 'WriteGeo', 'ZBlur', 'ZMerge', 'ZSlice'
+]
+NK_UPSCALED_ICONS = [
+    'AddTimeCode', 'AutoCrop', 'Axis_3D', 'BlinkBlur', 'BlinkFilterErode', 'BlinkScript', 'BurnIn', 'CameraTracker',
+    'CameraTracker_3D', 'Camera_3D', 'CatFileCreator', 'CatteryDefault', 'CatteryDeNoising', 'CatteryDepth',
+    'CatteryInPainting', 'CatteryMenu', 'CatteryOpticalFlow', 'CatteryOther', 'CatterySegmentation', 'CatteryStylisation',
+    'CatteryUpScaling', 'ChromaKeyer', 'ClipTest', 'ColorAdd', 'ColorGamma', 'ColorMatrix', 'ColorMult', 'CompareMetaData',
+    'ConstantShader_3D', 'CopyCat', 'CopyMetaData', 'CopyNode', 'Create_3D', 'Cryptomatte', 'Deblur', 'DeepColorCorrect',
+    'DeepCrop', 'DeepExpression', 'DeepFromFrames', 'DeepFromImage', 'DeepHoldout', 'DeepMerge', 'DeepRead', 'DeepRecolor',
+    'DeepReformat', 'DeepSample', 'DeepToImage', 'DeepToPoints', 'DeepTransform', 'DeepWrite', 'denoise', 'DepthGenerator',
+    'DepthGenerator_3D', 'DepthToPoints', 'DepthToPosition', 'DepthToPosition_3D', 'DifferenceKeyer', 'DirectLight_3D',
+    'DiskCache', 'DropShadow', 'EdgeExtend', 'Encryptomatte', 'EnvironmentLight_3D', 'Expression', 'Field', 'FieldConstant',
+    'FieldCrop', 'FieldImage', 'FieldInvert', 'FieldMath', 'FieldMerge', 'FieldMix', 'FieldPosition', 'FieldRamp',
+    'FieldShape', 'FieldShapeModify', 'FieldShapeToDensity', 'FieldTransform', 'GaussianSplat@2x', 'GeoBindMaterial_3D',
+    'GeoCard', 'GeoCard_3D', 'GeoClearMask_3D', 'GeoCollection_3D', 'GeoColorSpace_3D', 'GeoConstrain_3D', 'GeoCube',
+    'GeoCube_3D', 'GeoCylinder', 'GeoCylinder_3D', 'GeoDeletePoints_3D', 'GeoDisplace_3D', 'GeoDrawMode_3D', 'GeoDuplicate_3D',
+    'GeoExport', 'GeoExport_3D', 'GeoFieldSet', 'GeoGeneratePoints_3D', 'GeoGrade', 'GeoImport', 'GeoImport_3D', 'GeoInstance_3D',
+    'GeoMask_3D', 'GeoMerge_3D', 'GeoNoise_3D', 'GeoNormals_3D', 'GeoPointsToMesh', 'GeoPointsToMesh_3D', 'GeoPoints_3D',
+    'GeoPython_3D', 'GeoRadialWarp_3D', 'GeoReference_3D', 'GeoScene_3D', 'GeoScope_3D', 'GeoSelector_3D', 'GeoSphere',
+    'GeoSphere_3D', 'GeoTransform_3D', 'GeoTrilinearWarp_3D', 'GeoUVProject_3D', 'GeoViewScene_3D', 'GeoVisibility_3D',
+    'GridWarpTracker', 'ImageField', 'ImageModeler', 'Inference', 'Inpaint', 'Lights_3D', 'Light_3D', 'Log2Lin2', 'LookTransform',
+    'MatchGrade', 'MergeDifference', 'MergeIn', 'MergeLayerShader_3D', 'MergeMatte', 'MergeMax', 'MergeMin', 'MergeMultiply',
+    'MergeOut', 'MergePlus', 'MergeScreen', 'MetaData', 'MixViews', 'Modeler', 'ModifyMetaData', 'Modify_3D', 'NukeDoc', 'OCIO',
+    'OCIODisplay', 'ParticleBlinkScript', 'ParticleBounce', 'ParticleCache', 'ParticleCurve', 'ParticleDirectionalForce',
+    'ParticleDrag', 'ParticleEmitter', 'ParticleExpression', 'ParticleGravity', 'ParticleInfo', 'ParticleLookAt', 'ParticleMerge',
+    'ParticleMotionAlign', 'ParticlePointForce', 'Particles', 'ParticleSpawn', 'ParticleSpeedLimit', 'ParticleToGeo',
+    'ParticleTurbulence', 'ParticleVortex', 'ParticleWind', 'particle_settings', 'Payloads', 'pgBokeh', 'planar_tracker',
+    'PointCloudGenerator', 'PointCloudMesh', 'PositionToPoints', 'pPointCloud', 'Precomp', 'PremultByColor', 'Project3D_3D',
+    'ProjectionSolver', 'ReConverge', 'ReLight', 'RenderMan', 'RenderManShader', 'Roto', 'RotoPaint', 'ScanlineRender_3D', 'Shaders',
+    'Shaders_3D', 'Shader_3D', 'SmartVector', 'SpotLight_3D', 'TabScriptEditor', 'TargetCamera', 'Tile', 'TimeClip', 'Toe',
+    'Toolbar3D_3D', 'UltBrush', 'UltColorPicker', 'UltEraser', 'Ultimatte', 'Upscale', 'VariableGroup', 'VariableSwitch',
+    'VectorCornerPin', 'VectorDistort', 'VectorGenerator', 'VectorToMotion', 'ViewMetaData'
+]
+# fmt:on
+# pylint: enable=line-too-long
+NK_PREFS = NKSettings()
+NK_IS_COMMERCIAL = not (nuke.env.get("indie") or nuke.env.get("nc"))
+NK_RPC_CLIENT = Presence("1503841982743707718")
+NK_UPDATE_DETAILS = RPCUpdateDetails("nuke")
+NK_SESSION = SessionInfo()
+NK_SETTINGS_WINDOW: QtSettingsGUIMenu | None = None
+
+####################
+# Property Getters #
+####################
+
+
+class NKContext:
+    @classmethod
+    def capture(cls) -> "NKContext | None":
+        return cls()
+
+    def get_app_str(self, include_version: bool = False) -> str:
+        version = nuke.env.get("NukeVersionString")
+        studio = nuke.env.get("studio")
+        x = nuke.env.get("nukex")
+        appname = "NukeX" if x else "NukeStudio" if studio else "Nuke"
+        nc_str = " Non-Commercial" if not NK_IS_COMMERCIAL else ""
+        if include_version:
+            return f"{appname} {version}{nc_str}"
+        else:
+            return f"{appname}{nc_str}"
+
+    def get_memory_usage(self) -> str:
+        mem_bytes = nuke.memory2.usage()
+        return f"Using {get_file_size_str(mem_bytes)} of memory"
+
+    def get_frame(self) -> int:
+        return nuke.frame()
+
+    def get_frame_range(self) -> Tuple[int, int]:
+        frame_range = nuke.root().frameRange()
+        return (frame_range.first(), frame_range.last())
+
+    def get_active_node(self) -> Tuple[str, str] | None:
+        if NK_PREFS.disableNodeQueries:
+            return None
+        try:
+            active_node = nuke.selectedNode()
+        except ValueError:
+            return None
+        if active_node is None:
+            return None
+        node_name = active_node.name()
+        node_class = active_node.Class()
+        return (node_name, node_class)
+
+    def get_num_nodes(self) -> str:
+        if (
+            not NK_IS_COMMERCIAL
+        ):  # This doesn't count nodes in groups; use it for only NC users
+            nodes = nuke.root().numNodes()
+        else:
+            nodes = len(nuke.allNodes(recurseGroups=True))
+        return nk_plural(nodes, "node")
+
+    def get_io_nodes(self) -> str | None:
+        if NK_PREFS.disableNodeQueries:
+            return None
+        read_nodes = nuke.allNodes("Read")
+        write_nodes = nuke.allNodes("Write")
+        if read_nodes is not None and write_nodes is not None:
+            if read_nodes and write_nodes:
+                return (
+                    f"{nk_plural(len(read_nodes), 'read node')}; "
+                    f"{nk_plural(len(write_nodes), 'write node')}"
+                )
+            elif read_nodes:
+                return nk_plural(len(read_nodes), "read node")
+            elif write_nodes:
+                return nk_plural(len(write_nodes), "write node")
+        elif read_nodes is not None and read_nodes:
+            return nk_plural(len(read_nodes), "read node")
+        elif write_nodes is not None and write_nodes:
+            return nk_plural(len(write_nodes), "write node")
+        else:
+            return None
+
+    def get_num_layers(self) -> str:
+        return nk_plural(len(nuke.layers()), "layer")
+
+    def get_viewer_str(self) -> str | None:
+        """Construct a string representing the viewing context: the node 
+        being viewed through the viewer, the channel being viewed, and the
+        viewer process (if not sRGB)"""
+        viewer = nuke.activeViewer()
+        if viewer is None:
+            return None
+        node = viewer.node()
+        idx = viewer.activeInput()
+        upstream = node.input(idx) if idx is not None else None
+        if upstream is None:
+            return None
+        channels = node["channels"].value()
+        vp = node["viewerProcess"].value()
+        parts = [f"Viewing {upstream.name()}"]
+        if channels:
+            parts.append(f"({channels})")
+        if vp and vp != "sRGB":
+            parts.append(f"in {vp}")
+        return " ".join(parts)
+
+    def get_color_management(self) -> str:
+        cm = nuke.root()["colorManagement"].value()
+        return f"Color management: {cm}"
+
+    def get_comp_name(self) -> str:
+        try:
+            return Path(nuke.scriptName()).name
+        except RuntimeError:
+            return "Unsaved Script"
+
+    def get_fps(self) -> float:
+        return nuke.root().realFps()
+
+    def get_format_str(self) -> str:
+        fmt = nuke.root().format()
+        fmt_name = fmt.name().replace("_", " ").strip()
+        return f"{fmt_name} ({fmt.width()}x{fmt.height()})"
+
+    def get_scaling_info(self) -> str | None:
+        root = nuke.root()
+        viewer = nuke.activeViewer()
+        if root["proxy"].value():
+            proxy = root["proxy_scale"].value()
+        else:
+            proxy = 1
+        if viewer is not None:
+            downrez = viewer.node()["downrez"].value()
+        else:
+            downrez = 1
+        if proxy != 1 or downrez != 1:
+            return f"Proxy {proxy}x, downrez 1/{downrez}"
+        else:
+            return None
+
+
+#######
+# RPC #
+#######
+
+
+def nk_update_large_icon(ctx: NKContext):
+    NK_UPDATE_DETAILS.large_icon = "nuke"
+    NK_UPDATE_DETAILS.large_icon_text = ctx.get_app_str(NK_PREFS.displayVersion)
+
+
+def nk_update_small_icon(ctx: NKContext):
+    NK_UPDATE_DETAILS.small_icon = None
+    NK_UPDATE_DETAILS.small_icon_text = ""
+    if NK_PREFS.displaySmallIcon:
+        res = ctx.get_active_node()
+        if res is not None:
+            if res[1] not in NK_HD_ICONS and res[1] not in NK_UPSCALED_ICONS:
+                return
+            if res[1] not in NK_HD_ICONS and NK_PREFS.disableUpscaledNodes:
+                return
+            NK_UPDATE_DETAILS.small_icon = res[1].lower()
+            NK_UPDATE_DETAILS.small_icon_text = f"{res[0]} ({res[1]})"
+
+
+def nk_handle_active_node(ctx: NKContext) -> str | None:
+    node = ctx.get_active_node()
+    if ( # User has set details or state to a fixed 'active node' display
+        not NK_PREFS.detailsCycle and NK_PREFS.detailsType == "active_node" or \
+        not NK_PREFS.stateCycle and NK_PREFS.stateType == "active_node"
+    ) or \
+    ( # Icons disabled
+        not NK_PREFS.displaySmallIcon
+    ) or \
+    ( # Node has no valid icon
+        node is not None and \
+        (
+            (node[1] not in NK_HD_ICONS and node[1] not in NK_UPSCALED_ICONS) or \
+            (node[1] not in NK_HD_ICONS and NK_PREFS.disableUpscaledNodes)
+        )
+    ):
+        if node is None:
+            return "No nodes selected"
+        else:
+            return f"{node[0]} ({node[1]})"
+    else: # Node has a small icon which will be displayed AND we're in a cycle: skip
+        return None
+
+NK_DISPLAY_TYPES = {
+    "memory_usage": lambda ctx: ctx.get_memory_usage(),
+    "num_nodes": lambda ctx: ctx.get_num_nodes(),
+    "active_node": nk_handle_active_node,
+    "io_nodes": lambda ctx: ctx.get_io_nodes(),
+    "num_layers": lambda ctx: ctx.get_num_layers(),
+    "viewer_info": lambda ctx: ctx.get_viewer_str(),
+    "color_management": lambda ctx: ctx.get_color_management(),
+    "comp_name": lambda ctx: ctx.get_comp_name(),
+    "format": lambda ctx: ctx.get_format_str(),
+    "scaling": lambda ctx: ctx.get_scaling_info(),
+}
+
+
+# Nuke does not provide a way to get the frame range of what's actually rendering
+# since it happens through an execute dialog/function which doesn't get hooked
+# This is just an approximation.
+def nk_update_presence_details(ctx):
+    # Rendering Details
+    if NK_PREFS.enableDetails and NK_SESSION.is_rendering:
+        fname = ctx.get_comp_name()
+        frame_range = ctx.get_frame_range()
+        NK_UPDATE_DETAILS.details_text = (
+            f"Rendering {fname}"
+            + (": " if (NK_PREFS.displayFrames and frame_range[1]) else "")
+            + (
+                f"Frame {frame_range[0]} of {frame_range[1]}"
+                if NK_PREFS.displayFrames and frame_range[1]
+                else ""
+            )
+        )
+    elif NK_PREFS.enableDetails:
+        update_slot(
+            ctx, "details", NK_PREFS, NK_UPDATE_DETAILS, NK_DISPLAY_TYPES, NK_SESSION
+        )
+    else:
+        NK_UPDATE_DETAILS.details_text = ""
+
+
+def nk_update_presence():
+    if NK_PREFS.generalEnable:
+        ctx = NKContext.capture()
+        if ctx is None:
+            return
+        if NK_PREFS.detailsCycle or NK_PREFS.stateCycle:
+            advance_cycle(NK_SESSION, NK_DISPLAY_TYPES)
+        nk_update_large_icon(ctx)
+        nk_update_small_icon(ctx)
+        nk_update_presence_details(ctx)
+        update_slot(
+            ctx, "state", NK_PREFS, NK_UPDATE_DETAILS, NK_DISPLAY_TYPES, NK_SESSION
+        )
+        update_buttons(NK_UPDATE_DETAILS, NK_PREFS)
+        push_rpc_update(
+            NK_SESSION, NK_UPDATE_DETAILS, NK_PREFS, NK_RPC_CLIENT, "nuke", nuke.error
+        )
+    elif NK_SESSION.connected:
+        try:
+            NK_RPC_CLIENT.clear()
+        except Exception as e:  # noqa: BLE001
+            nuke.warning(f"[NukePresence] clear failed: {e}")
+            NK_SESSION.connected = False
+
+
+#############
+# Threading #
+#############
+
+
+class NKBackgroundWorker:
+    def __init__(self):
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+        )
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        self._thread.join(timeout=5)
+
+    def _run(self):
+        while not self._stop_event.wait(NK_PREFS.generalUpdate):
+            try:
+                nuke.executeInMainThreadWithResult(nk_update_presence)
+            except Exception as e:
+                nuke.executeInMainThreadWithResult(
+                    lambda e=e: nuke.warning(f"[NukePresence] Update Error: {e}")
+                )
+
+
+#############
+# Callbacks #
+#############
+
+
+def nk_install_render_callbacks():
+    nuke.addBeforeRender(on_render_start, args=(NK_SESSION, NK_PREFS))
+    nuke.addAfterFrameRender(on_frame_render_end, args=(NK_SESSION,))
+    nuke.addAfterRender(on_render_end, args=(NK_SESSION, NK_PREFS))
+
+
+def nk_uninstall_render_callbacks():
+    nuke.removeBeforeRender(on_render_start, args=(NK_SESSION, NK_PREFS))
+    nuke.removeAfterFrameRender(on_frame_render_end, args=(NK_SESSION,))
+    nuke.removeAfterRender(on_render_end, args=(NK_SESSION, NK_PREFS))
+
+
+#####################
+# GUI Settings Menu #
+#####################
+
+
+class NukeSettingsWindow(QtSettingsGUIMenu):
+    def __init__(self, parent=None):
+        super().__init__(NK_PREFS, nk_update_presence, "Nuke", parent)
+
+
+def nk_open_settings():
+    global NK_SETTINGS_WINDOW
+    if NK_SETTINGS_WINDOW is not None and NK_SETTINGS_WINDOW.isVisible():
+        NK_SETTINGS_WINDOW.raise_()
+        NK_SETTINGS_WINDOW.activateWindow()
+        return
+
+    nuke_main_window = QtW.QApplication.activeWindow()
+
+    NK_SETTINGS_WINDOW = NukeSettingsWindow(parent=nuke_main_window)
+
+    if NK_SETTINGS_WINDOW is None:
+        nuke.warning("[NukePresence] could not register settings menu")
+        return
+    NK_SETTINGS_WINDOW.show()
+
+
+###################
+# Plugin Lifetime #
+###################
+
+
+class NKMenu:
+    def __init__(self, prefs, worker):
+        menubar = nuke.menu("Nuke")
+        discord_menu = menubar.addMenu("Discord")
+        self.enable_item = discord_menu.addCommand(
+            "Enable Rich Presence", command=self.start
+        )
+        self.disable_item = discord_menu.addCommand(
+            "Disable Rich Presence", command=self.stop
+        )
+        discord_menu.addCommand("Settings", command=nk_open_settings)
+        self.prefs = prefs
+        self.worker = worker
+        self.start()
+
+    def start(self):
+        if not NK_SESSION.connected:
+            NK_SESSION.connected = connect_rpc(NK_RPC_CLIENT, "Nuke", nuke.warning)
+        self.enable_item.setEnabled(False)
+        self.disable_item.setEnabled(True)
+        self.prefs.generalEnable = True
+
+    def stop(self):
+        self.enable_item.setEnabled(True)
+        self.disable_item.setEnabled(False)
+        self.prefs.generalEnable = False
+
+
+NK_WORKER = NKBackgroundWorker()
+NK_PREFS.setup_persistence(
+    path=os.path.join(os.path.expanduser("~/.nuke"), "nuke_presence_preferences.json"),
+    app_name="nuke",
+    warn=nuke.warning,
+    refresh_func=nk_update_presence,
+)
+NK_MENU = NKMenu(NK_PREFS, NK_WORKER)
+nk_install_render_callbacks()
+atexit.register(force_clear_on_exit, NK_RPC_CLIENT)

@@ -1,0 +1,1 @@
+All tests and fake API modules written by Claude Opus 4.7 via Claude Code. Test files were reviewed afterwards, and test results and coverage examined.

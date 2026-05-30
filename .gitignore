@@ -1,0 +1,15 @@
+icons
+.vscode
+.vs
+.claude
+.venv
+dist/
+__pycache__/
+.pytest_cache
+*.pyc
+obj
+bin
+houdini_presence
+c4d_presence
+.coverage
+docs/

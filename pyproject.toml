@@ -1,0 +1,62 @@
+[project]
+name = "dcc-rpc"
+version = "0.1.0"
+description = "Discord Rich Presence plugins for creative applications"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pypresence>=4.6.1",
+    "pyside6>=6.11.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Each per-plugin test subdirectory has its own conftest.py that inserts the
+# right fake module + plugin source into sys.path. pytest's rootdir-aware
+# discovery picks them up automatically. No extra config needed.
+#
+# `gui` tests build real Qt windows; some momentarily flash on screen via
+# QDialog.show(). They're deselected by default so a plain `pytest` run is
+# headless and unobtrusive. To include them:
+#   pytest -m gui        # run only GUI tests
+#   pytest -m ""         # run everything, GUI and non-GUI
+markers = [
+    "gui: exercises Qt window construction; may briefly flash dialogs on screen",
+]
+addopts = "-m 'not gui'"
+
+[tool.coverage.run]
+branch = true
+source = ["common", "colors", "substance_painter_presence",
+          "substance_designer_presence", "krita_presence", "nuke_presence",
+          "gimp_presence", "maya_presence"]
+omit = [
+    # Vendored dependency, not our code:
+    "**/pypresence/**",
+    # One-shot scripts (build-time, not runtime):
+    "build.py",
+    "color_preprocessing/**",
+    # Tests + fakes are *test* code, not application code:
+    "tests/**",
+    # Plugin entry points / module-level side-effect blocks are mostly
+    # untestable lifecycle code (atexit, sp.event.DISPATCHER.connect, ...).
+    # Keep these in coverage but expect line counts to dip there.
+]
+
+[tool.coverage.report]
+# Don't fail on tests that don't import every module — show what we have.
+show_missing = true
+skip_empty = true
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
