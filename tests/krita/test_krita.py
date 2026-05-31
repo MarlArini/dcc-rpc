@@ -183,7 +183,7 @@ def test_layer_info_without_word_layer(kr):
         window=kr.make_window(),
         view=kr.make_view(),
     )
-    assert ctx.layer_info() == "Layer Foreground"
+    assert ctx.layer_info() == "Layer: Foreground"
 
 
 def test_layer_info_with_sublayers(kr):

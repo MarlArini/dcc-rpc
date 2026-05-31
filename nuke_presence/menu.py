@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import sys
 import threading
-from typing import Tuple, ClassVar, List
+from typing import Tuple, ClassVar, List, Dict, Any
 from PySide6 import QtWidgets as QtW
 from pypresence.presence import Presence
 
@@ -56,7 +56,10 @@ class NKSettings(SharedSettings, JSONSharedSettings):
         ("Format", "format"),
         ("Proxy info", "scaling"),
     ]
-    _INITIAL_DEFAULTS = {"detailsType": "comp_name", "stateType": "num_nodes"}
+    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
+        "detailsType": "comp_name",
+        "stateType": "num_nodes",
+    }
     displayRenderStats: bool = field(
         default=True,
         metadata={"group": "Details", "label": "Display render stats in details"},
@@ -66,21 +69,14 @@ class NKSettings(SharedSettings, JSONSharedSettings):
         metadata={"group": "Details", "label": "Display frames rendered in details"},
     )
     disableNodeQueries: bool = field(
-        default=False,
+        default=True,
         metadata={"group": "General", "label": "Disable querying nodes"},
-    )
-    disableUpscaledNodes: bool = field(
-        default=False,
-        metadata={
-            "group": "Icons",
-            "label": "Do not use upscaled (linear filtering) icons, only SVG-rendered ones",
-        },
     )
 
 
 # pylint: disable=line-too-long
 # fmt:off
-NK_HD_ICONS = [
+NK_ICONS = [
     '2D', '2DMasked', '3D', 'Add', 'Add32', 'AddMix', 'AdjBBox', 'Anaglyph', 'AppendClip', 'Assert', 'Axis', 
     'Backdrop', 'Bezier', 'Bilateral', 'BlackOutside', 'Blend', 'Blur', 'BumpBoss', 'Camera', 'CameraShake', 
     'Card', 'ChannelMerge', 'CheckerBoard', 'Clamp', 'CMSTestPattern', 'Color', 'Color3D', 'ColorBars', 
@@ -103,37 +99,7 @@ NK_HD_ICONS = [
     'TimeOffset', 'TimeWarp', 'Tracker', 'Transform', 'Truelight', 'TVIScale', 'Unpremult', 'VectorBlur', 
     'Vectorfield', 'Viewer', 'VolumeRays', 'Write', 'WriteGeo', 'ZBlur', 'ZMerge', 'ZSlice'
 ]
-NK_UPSCALED_ICONS = [
-    'AddTimeCode', 'AutoCrop', 'Axis_3D', 'BlinkBlur', 'BlinkFilterErode', 'BlinkScript', 'BurnIn', 'CameraTracker',
-    'CameraTracker_3D', 'Camera_3D', 'CatFileCreator', 'CatteryDefault', 'CatteryDeNoising', 'CatteryDepth',
-    'CatteryInPainting', 'CatteryMenu', 'CatteryOpticalFlow', 'CatteryOther', 'CatterySegmentation', 'CatteryStylisation',
-    'CatteryUpScaling', 'ChromaKeyer', 'ClipTest', 'ColorAdd', 'ColorGamma', 'ColorMatrix', 'ColorMult', 'CompareMetaData',
-    'ConstantShader_3D', 'CopyCat', 'CopyMetaData', 'CopyNode', 'Create_3D', 'Cryptomatte', 'Deblur', 'DeepColorCorrect',
-    'DeepCrop', 'DeepExpression', 'DeepFromFrames', 'DeepFromImage', 'DeepHoldout', 'DeepMerge', 'DeepRead', 'DeepRecolor',
-    'DeepReformat', 'DeepSample', 'DeepToImage', 'DeepToPoints', 'DeepTransform', 'DeepWrite', 'denoise', 'DepthGenerator',
-    'DepthGenerator_3D', 'DepthToPoints', 'DepthToPosition', 'DepthToPosition_3D', 'DifferenceKeyer', 'DirectLight_3D',
-    'DiskCache', 'DropShadow', 'EdgeExtend', 'Encryptomatte', 'EnvironmentLight_3D', 'Expression', 'Field', 'FieldConstant',
-    'FieldCrop', 'FieldImage', 'FieldInvert', 'FieldMath', 'FieldMerge', 'FieldMix', 'FieldPosition', 'FieldRamp',
-    'FieldShape', 'FieldShapeModify', 'FieldShapeToDensity', 'FieldTransform', 'GaussianSplat@2x', 'GeoBindMaterial_3D',
-    'GeoCard', 'GeoCard_3D', 'GeoClearMask_3D', 'GeoCollection_3D', 'GeoColorSpace_3D', 'GeoConstrain_3D', 'GeoCube',
-    'GeoCube_3D', 'GeoCylinder', 'GeoCylinder_3D', 'GeoDeletePoints_3D', 'GeoDisplace_3D', 'GeoDrawMode_3D', 'GeoDuplicate_3D',
-    'GeoExport', 'GeoExport_3D', 'GeoFieldSet', 'GeoGeneratePoints_3D', 'GeoGrade', 'GeoImport', 'GeoImport_3D', 'GeoInstance_3D',
-    'GeoMask_3D', 'GeoMerge_3D', 'GeoNoise_3D', 'GeoNormals_3D', 'GeoPointsToMesh', 'GeoPointsToMesh_3D', 'GeoPoints_3D',
-    'GeoPython_3D', 'GeoRadialWarp_3D', 'GeoReference_3D', 'GeoScene_3D', 'GeoScope_3D', 'GeoSelector_3D', 'GeoSphere',
-    'GeoSphere_3D', 'GeoTransform_3D', 'GeoTrilinearWarp_3D', 'GeoUVProject_3D', 'GeoViewScene_3D', 'GeoVisibility_3D',
-    'GridWarpTracker', 'ImageField', 'ImageModeler', 'Inference', 'Inpaint', 'Lights_3D', 'Light_3D', 'Log2Lin2', 'LookTransform',
-    'MatchGrade', 'MergeDifference', 'MergeIn', 'MergeLayerShader_3D', 'MergeMatte', 'MergeMax', 'MergeMin', 'MergeMultiply',
-    'MergeOut', 'MergePlus', 'MergeScreen', 'MetaData', 'MixViews', 'Modeler', 'ModifyMetaData', 'Modify_3D', 'NukeDoc', 'OCIO',
-    'OCIODisplay', 'ParticleBlinkScript', 'ParticleBounce', 'ParticleCache', 'ParticleCurve', 'ParticleDirectionalForce',
-    'ParticleDrag', 'ParticleEmitter', 'ParticleExpression', 'ParticleGravity', 'ParticleInfo', 'ParticleLookAt', 'ParticleMerge',
-    'ParticleMotionAlign', 'ParticlePointForce', 'Particles', 'ParticleSpawn', 'ParticleSpeedLimit', 'ParticleToGeo',
-    'ParticleTurbulence', 'ParticleVortex', 'ParticleWind', 'particle_settings', 'Payloads', 'pgBokeh', 'planar_tracker',
-    'PointCloudGenerator', 'PointCloudMesh', 'PositionToPoints', 'pPointCloud', 'Precomp', 'PremultByColor', 'Project3D_3D',
-    'ProjectionSolver', 'ReConverge', 'ReLight', 'RenderMan', 'RenderManShader', 'Roto', 'RotoPaint', 'ScanlineRender_3D', 'Shaders',
-    'Shaders_3D', 'Shader_3D', 'SmartVector', 'SpotLight_3D', 'TabScriptEditor', 'TargetCamera', 'Tile', 'TimeClip', 'Toe',
-    'Toolbar3D_3D', 'UltBrush', 'UltColorPicker', 'UltEraser', 'Ultimatte', 'Upscale', 'VariableGroup', 'VariableSwitch',
-    'VectorCornerPin', 'VectorDistort', 'VectorGenerator', 'VectorToMotion', 'ViewMetaData'
-]
+
 # fmt:on
 # pylint: enable=line-too-long
 NK_PREFS = NKSettings()
@@ -150,7 +116,7 @@ NK_SETTINGS_WINDOW: QtSettingsGUIMenu | None = None
 
 class NKContext:
     @classmethod
-    def capture(cls) -> "NKContext | None":
+    def capture(cls) -> "NKContext":
         return cls()
 
     def get_app_str(self, include_version: bool = False) -> str:
@@ -223,9 +189,11 @@ class NKContext:
         return nk_plural(len(nuke.layers()), "layer")
 
     def get_viewer_str(self) -> str | None:
-        """Construct a string representing the viewing context: the node 
+        """Construct a string representing the viewing context: the node
         being viewed through the viewer, the channel being viewed, and the
         viewer process (if not sRGB)"""
+        if NK_PREFS.disableNodeQueries:
+            return None
         viewer = nuke.activeViewer()
         if viewer is None:
             return None
@@ -294,9 +262,7 @@ def nk_update_small_icon(ctx: NKContext):
     if NK_PREFS.displaySmallIcon:
         res = ctx.get_active_node()
         if res is not None:
-            if res[1] not in NK_HD_ICONS and res[1] not in NK_UPSCALED_ICONS:
-                return
-            if res[1] not in NK_HD_ICONS and NK_PREFS.disableUpscaledNodes:
+            if res[1] not in NK_ICONS:
                 return
             NK_UPDATE_DETAILS.small_icon = res[1].lower()
             NK_UPDATE_DETAILS.small_icon_text = f"{res[0]} ({res[1]})"
@@ -304,26 +270,27 @@ def nk_update_small_icon(ctx: NKContext):
 
 def nk_handle_active_node(ctx: NKContext) -> str | None:
     node = ctx.get_active_node()
-    if ( # User has set details or state to a fixed 'active node' display
-        not NK_PREFS.detailsCycle and NK_PREFS.detailsType == "active_node" or \
-        not NK_PREFS.stateCycle and NK_PREFS.stateType == "active_node"
-    ) or \
-    ( # Icons disabled
-        not NK_PREFS.displaySmallIcon
-    ) or \
-    ( # Node has no valid icon
-        node is not None and \
-        (
-            (node[1] not in NK_HD_ICONS and node[1] not in NK_UPSCALED_ICONS) or \
-            (node[1] not in NK_HD_ICONS and NK_PREFS.disableUpscaledNodes)
+    if (
+        (  # User has set details or state to a fixed 'active node' display
+            not NK_PREFS.detailsCycle
+            and NK_PREFS.detailsType == "active_node"
+            or not NK_PREFS.stateCycle
+            and NK_PREFS.stateType == "active_node"
+        )
+        or (  # Icons disabled
+            not NK_PREFS.displaySmallIcon
+        )
+        or (  # Node has no valid icon
+            node is not None and node[1] not in NK_ICONS
         )
     ):
         if node is None:
             return "No nodes selected"
         else:
             return f"{node[0]} ({node[1]})"
-    else: # Node has a small icon which will be displayed AND we're in a cycle: skip
+    else:  # Node has a small icon which will be displayed AND we're in a cycle: skip
         return None
+
 
 NK_DISPLAY_TYPES = {
     "memory_usage": lambda ctx: ctx.get_memory_usage(),
@@ -481,19 +448,26 @@ class NKMenu:
         discord_menu.addCommand("Settings", command=nk_open_settings)
         self.prefs = prefs
         self.worker = worker
-        self.start()
+        if self.prefs.generalEnable and not NK_SESSION.connected:
+            NK_SESSION.connected = connect_rpc(NK_RPC_CLIENT, "Nuke", nuke.warning)
+        self._sync_menu_state()
+
+    def _sync_menu_state(self):
+        """Match the enable/disable menu items' enabled state to generalEnable."""
+        self.enable_item.setEnabled(not self.prefs.generalEnable)
+        self.disable_item.setEnabled(self.prefs.generalEnable)
 
     def start(self):
         if not NK_SESSION.connected:
             NK_SESSION.connected = connect_rpc(NK_RPC_CLIENT, "Nuke", nuke.warning)
-        self.enable_item.setEnabled(False)
-        self.disable_item.setEnabled(True)
         self.prefs.generalEnable = True
+        self.prefs.flush()
+        self._sync_menu_state()
 
     def stop(self):
-        self.enable_item.setEnabled(True)
-        self.disable_item.setEnabled(False)
         self.prefs.generalEnable = False
+        self.prefs.flush()
+        self._sync_menu_state()
 
 
 NK_WORKER = NKBackgroundWorker()
@@ -504,5 +478,6 @@ NK_PREFS.setup_persistence(
     refresh_func=nk_update_presence,
 )
 NK_MENU = NKMenu(NK_PREFS, NK_WORKER)
+NK_WORKER.start()
 nk_install_render_callbacks()
 atexit.register(force_clear_on_exit, NK_RPC_CLIENT)

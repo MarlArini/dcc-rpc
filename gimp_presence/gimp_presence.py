@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import ClassVar, List, Tuple, Dict, Callable, Set
+from typing import ClassVar, List, Tuple, Dict, Callable, Set, Any
 
 from pypresence.presence import Presence
 
@@ -32,7 +32,6 @@ from common import (  # noqa: E402
     SessionInfo,
     ColoredIconSettings,
     plural as gp_plural,
-    JSONSharedSettings,
     RPCUpdateDetails,
     push_rpc_update,
     connect_rpc,
@@ -40,7 +39,7 @@ from common import (  # noqa: E402
     update_buttons,
 )
 from colors import find_closest as gp_find_closest_color  # noqa: E402
-from settings_dialog import SETTINGS_PROC_NAME, build_settings_procedure  # noqa: E402
+from settings_dialog import SETTINGS_PROC_NAME, build_settings_procedure, _gp_warn  # noqa: E402
 
 
 # Bootstrap: ensure this plugin's directory is on sys.path so the sibling
@@ -50,7 +49,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 _GP_PATTERN = re.compile(r"\[(\w+)\]")
-_GP_PINNED_IMAGE: Gimp.Image | None = None
+_GP_PINNED_IMAGE: int | None = None
 _GP_PREFS_PATH = Path(Gimp.directory()) / "plug-in-settings" / "gimp_presence.json"
 _GP_DOCNAME_WAS_DOCCOUNT: bool = False
 _GP_TEMP_PROCEDURES_REGISTERED: bool = False
@@ -58,25 +57,38 @@ _GP_TEMP_PROCEDURES_REGISTERED: bool = False
 _GP_MAIN_LOOP: GLib.MainLoop | None = None
 _GP_TIMER_ID: int | None = None
 
-def gp_pin_image(procedure, run_mode, image, drawables, config, data):  # pylint: disable=unused-argument
+#pylint: disable=unused-argument
+
+def gp_pin_image(procedure, run_mode, image, drawables, config, *data):
     global _GP_PINNED_IMAGE
-    _GP_PINNED_IMAGE = image
+    _GP_PINNED_IMAGE = image.get_id()
+    return procedure.new_return_values(
+        Gimp.PDBStatusType.SUCCESS,
+        None
+    )
 
-
-def gp_unpin_image(*args):  # pylint: disable=unused-argument
+def gp_unpin_image(procedure, run_mode, image, drawables, config, *data):
     global _GP_PINNED_IMAGE
     _GP_PINNED_IMAGE = None
+    return procedure.new_return_values(
+        Gimp.PDBStatusType.SUCCESS,
+        None
+    )
 
-
-def gp_toggle_rpc(*args):  # pylint: disable=unused-argument
+def gp_toggle_rpc(procedure, run_mode, image, drawables, config, *data):
     GP_PREFS.generalEnable = not GP_PREFS.generalEnable
+    return procedure.new_return_values(
+        Gimp.PDBStatusType.SUCCESS,
+        None
+    )
 
+#pylint: enable=unused-argument
 
 ############
 # Settings #
 ############
 @dataclass
-class GPSettings(SharedSettings, ColoredIconSettings, JSONSharedSettings):
+class GPSettings(SharedSettings, ColoredIconSettings):
     # pylint: disable=invalid-name
     _PREFIX: ClassVar[str] = "gimpPresence_"
     INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
@@ -89,7 +101,7 @@ class GPSettings(SharedSettings, ColoredIconSettings, JSONSharedSettings):
         ("Image dimensions", "dimensions"),
         ("Paint mode", "paint_mode"),
     ]
-    _INITIAL_DEFAULTS: ClassVar[dict] = {
+    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
         "detailsType": "image_name",
         "stateType": "layer_info",
     }
@@ -136,7 +148,7 @@ def gp_load_settings():
             if f.name in data:
                 object.__setattr__(GP_PREFS, f.name, data[f.name])
     except Exception as e:
-        Gimp.warning(f"[GimpPresence] Failed to load settings: {e}")
+        _gp_warn(f"[GimpPresence] Failed to load settings: {e}")
 
 
 GP_PREFS = GPSettings()
@@ -185,11 +197,13 @@ def _gp_match_title(title: str, images: List[Gimp.Image]) -> Gimp.Image | None:
 
 
 def _gp_get_active_image() -> Gimp.Image | None:
+    global _GP_PINNED_IMAGE
     if _GP_PINNED_IMAGE is not None:
-        if _GP_PINNED_IMAGE in Gimp.get_images():
-            return _GP_PINNED_IMAGE
+        if Gimp.Image.id_is_valid(_GP_PINNED_IMAGE):
+            img_map = {i.get_id(): i for i in Gimp.get_images()}
+            return img_map[_GP_PINNED_IMAGE]
         else:
-            gp_unpin_image()
+            _GP_PINNED_IMAGE = None
     images = Gimp.get_images()
     if not images:
         return None
@@ -437,7 +451,7 @@ GP_DISPLAY_TYPES: Dict[str, Callable] = {
 }
 GP_DOCS_OPEN: Set[int] = set()
 GP_DETAILS = RPCUpdateDetails("gimp")
-GP_RPC_CLIENT = Presence("")  # TODO
+GP_RPC_CLIENT = Presence("1510363090724720681")
 
 
 def gp_update_small_icon(ctx: GPContext):  # pylint: disable=unused-argument
@@ -461,7 +475,7 @@ def gp_update_large_icon(ctx: GPContext):
 
 def gp_push_rpc_update():
     push_rpc_update(
-        GP_SESSION, GP_DETAILS, GP_PREFS, GP_RPC_CLIENT, "gimp", Gimp.warning
+        GP_SESSION, GP_DETAILS, GP_PREFS, GP_RPC_CLIENT, "gimp", _gp_warn
     )
 
 
@@ -471,7 +485,7 @@ def gp_update_presence():
             try:
                 GP_RPC_CLIENT.clear()
             except Exception as e:  # noqa: BLE001
-                Gimp.warning(f"[GimpPresence] clear failed: {e}")
+                _gp_warn(f"[GimpPresence] clear failed: {e}")
                 GP_SESSION.connected = False
         return
     ctx = GPContext.capture()
@@ -511,13 +525,13 @@ _GP_TOGGLE_DOC = (
 )
 
 _GP_TEMP_PROCEDURES = {
-    "gimppresence_pin_image": (gp_pin_image, "GimpPresence: Pin Image", _GP_PIN_DOC),
-    "gimppresence_unpin_image": (
+    "gimppresence-pin-image": (gp_pin_image, "GimpPresence: Pin Image", _GP_PIN_DOC),
+    "gimppresence-unpin-image": (
         gp_unpin_image,
         "GimpPresence: Unpin Image",
         _GP_UNPIN_DOC,
     ),
-    "gimppresence_toggle_rpc": (
+    "gimppresence-toggle-rpc": (
         gp_toggle_rpc,
         "GimpPresence: Toggle RPC Connection",
         _GP_TOGGLE_DOC,
@@ -532,14 +546,9 @@ def _gp_on_settings_changed():
 def gp_register_temp_procedures(plugin: Gimp.PlugIn):
     global _GP_TEMP_PROCEDURES_REGISTERED
     for proc_name, proc_details in _GP_TEMP_PROCEDURES.items():
-        if proc_name == "gimppresence_pin_image":
-            procedure = Gimp.ImageProcedure.new(
-                plugin, proc_name, Gimp.PDBProcType.TEMPORARY, proc_details[0], None
-            )
-        else:
-            procedure = Gimp.Procedure.new(
-                plugin, proc_name, Gimp.PDBProcType.TEMPORARY, proc_details[0], None
-            )
+        procedure = Gimp.ImageProcedure.new(
+            plugin, proc_name, Gimp.PDBProcType.TEMPORARY, proc_details[0])
+        procedure.set_image_types("*")
         procedure.set_menu_label(proc_details[1])
         procedure.set_documentation(proc_details[2][0], proc_details[2][1], None)
         procedure.add_menu_path("<Image>/Filters/Discord Presence/")
@@ -569,7 +578,7 @@ def gp_run(procedure, config, data):  # pylint: disable=unused-argument
     global _GP_MAIN_LOOP
     plugin = procedure.get_plug_in()
     if not GP_SESSION.connected:
-        GP_SESSION.connected = connect_rpc(GP_RPC_CLIENT, "gimp", Gimp.warning)
+        GP_SESSION.connected = connect_rpc(GP_RPC_CLIENT, "gimp", _gp_warn)
     gp_load_settings()
     gp_register_temp_procedures(plugin)
     gp_start_timer()
@@ -608,7 +617,7 @@ def gp_tick():
     try:
         gp_update_presence()
     except Exception as e:
-        Gimp.warning(f"[GimpPresence] update failed: {e}")
+        _gp_warn(f"[GimpPresence] update failed: {e}")
     return True
 
 
@@ -618,13 +627,13 @@ def gp_quit_loop():
 
 
 class GPPlugin(Gimp.PlugIn):
-    _gp_procedures = ["gimppresence_run"]
+    _gp_procedures = ["gimppresence-run"]
 
     def do_query_procedures(self):
         return self._gp_procedures
 
     def do_create_procedure(self, name):
-        if name == "gimppresence_run":
+        if name == "gimppresence-run":
             procedure = Gimp.Procedure.new(
                 self, name, Gimp.PDBProcType.PERSISTENT, gp_run, None
             )

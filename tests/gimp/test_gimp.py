@@ -39,6 +39,7 @@ from gimp_presence import (
     gp_start_timer, gp_stop_timer, gp_tick, gp_quit_loop,
     _GP_TEMP_PROCEDURES, _GP_DOCNAME_WAS_DOCCOUNT, _GP_TEMP_PROCEDURES_REGISTERED
 )
+from settings_dialog import SETTINGS_PROC_NAME
 from gi.repository import GLib
 
 
@@ -146,9 +147,11 @@ class TestGpLoadSettings:
         gp._GP_PREFS_PATH = path
         snapshot = GP_PREFS.generalEnable
         gp_load_settings()
-        # Pref unchanged; warning logged.
+        # Pref unchanged; warning routed through settings_dialog._gp_warn,
+        # which uses Gimp.message (recorded in get_state().messages) rather
+        # than the older Gimp.warning surface.
         assert GP_PREFS.generalEnable == snapshot
-        assert any("Failed to load settings" in w for w in gimp.get_state().warnings)
+        assert any("Failed to load settings" in m for m in gimp.get_state().messages)
 
     def test_skips_private_and_unknown_fields(self, gimp, tmp_path):
         path = tmp_path / "prefs.json"
@@ -219,19 +222,22 @@ class TestGpGetActiveImage:
         assert _gp_get_active_image() is img
 
     def test_pinned_image_returned_when_still_open(self, gimp):
+        """_GP_PINNED_IMAGE now stores an image id (int), not the Image
+        object — guards against the wrapper going stale when GIMP recycles
+        Python proxies. The lookup goes back through Gimp.get_images()."""
         a = gimp.make_image(id=1, name="a")
         b = gimp.make_image(id=2, name="b")
         gimp.set_state(images=[a, b])
-        gp._GP_PINNED_IMAGE = b
+        gp._GP_PINNED_IMAGE = b.get_id()
         assert _gp_get_active_image() is b
 
     def test_pinned_image_unpins_when_closed(self, gimp):
-        """If the pinned image is no longer in get_images(), unpin and fall
-        through the rest of the cascade."""
+        """If the pinned id is no longer valid (image closed), unpin and
+        fall through the rest of the cascade."""
         a = gimp.make_image(id=1, name="a")
         b = gimp.make_image(id=2, name="b")
         gimp.set_state(images=[a])  # only a is still open
-        gp._GP_PINNED_IMAGE = b
+        gp._GP_PINNED_IMAGE = b.get_id()
         # 'a' is the only image, so single-image branch returns it.
         assert _gp_get_active_image() is a
         # Pin state was cleared.
@@ -578,22 +584,41 @@ class TestGPContext:
 # ---------------------------------------------------------------------------
 
 class TestPinToggle:
+    """All three are ImageProcedure run-funcs: 6-arg signature. Pin uses
+    `image`; Unpin and Toggle accept it but ignore it. They all share the
+    same shape because they're registered on the <Image>/ menu path, which
+    GIMP requires to use ImageProcedure dispatch. Each run-func ends with
+    `procedure.new_return_values(...)`, so the `procedure` arg must be a
+    real ImageProcedure-shaped object (not None)."""
+
+    def _make_proc(self, gimp, name):
+        """Cheap stand-in: ImageProcedure.new returns a _BaseProcedure
+        with new_return_values, which is all the run-funcs touch."""
+        from gi.repository import Gimp
+        return Gimp.ImageProcedure.new(
+            gimp.PlugIn(), name, Gimp.PDBProcType.TEMPORARY, lambda *_: None
+        )
+
     def test_pin_image_sets_global(self, gimp):
-        img = gimp.make_image(name="primary")
-        gp_pin_image(None, None, img, None, None, None)
-        assert gp._GP_PINNED_IMAGE is img
+        img = gimp.make_image(id=7, name="primary")
+        proc = self._make_proc(gimp, "gimppresence-pin-image")
+        gp_pin_image(proc, None, img, None, None, None)
+        # _GP_PINNED_IMAGE now stores the image id, not the Image object.
+        assert gp._GP_PINNED_IMAGE == 7
 
     def test_unpin_image_clears_global(self, gimp):
-        img = gimp.make_image()
-        gp._GP_PINNED_IMAGE = img
-        gp_unpin_image()
+        img = gimp.make_image(id=7)
+        gp._GP_PINNED_IMAGE = img.get_id()
+        proc = self._make_proc(gimp, "gimppresence-unpin-image")
+        gp_unpin_image(proc, None, img, None, None, None)
         assert gp._GP_PINNED_IMAGE is None
 
-    def test_toggle_rpc_flips_general_enable(self):
+    def test_toggle_rpc_flips_general_enable(self, gimp):
+        proc = self._make_proc(gimp, "gimppresence-toggle-rpc")
         GP_PREFS.generalEnable = True
-        gp_toggle_rpc()
+        gp_toggle_rpc(proc, None, gimp.make_image(), None, None, None)
         assert GP_PREFS.generalEnable is False
-        gp_toggle_rpc()
+        gp_toggle_rpc(proc, None, gimp.make_image(), None, None, None)
         assert GP_PREFS.generalEnable is True
 
 
@@ -672,7 +697,8 @@ class TestUpdatePresence:
         monkeypatch.setattr(gp.GP_RPC_CLIENT, "clear", _boom)
         gp_update_presence()
         assert GP_SESSION.connected is False
-        assert any("clear failed" in w for w in gimp.get_state().warnings)
+        # _gp_warn routes through Gimp.message (settings_dialog), not Gimp.warning.
+        assert any("clear failed" in m for m in gimp.get_state().messages)
 
     def _image_with_selection(self, gimp, id, name):
         """Helper: build an image whose get_selected_layers() returns one
@@ -778,13 +804,14 @@ class TestTimer:
 
     def test_tick_swallows_exceptions(self, gimp, monkeypatch):
         """A raised exception inside gp_update_presence should be caught,
-        warning logged, and gp_tick still returns True so the timer survives."""
+        warning logged via _gp_warn (→ Gimp.message), and gp_tick still
+        returns True so the timer survives."""
         def _raises():
             raise RuntimeError("explosion")
         monkeypatch.setattr(gp, "gp_update_presence", _raises)
         result = gp_tick()
         assert result is True
-        assert any("update failed" in w for w in gimp.get_state().warnings)
+        assert any("update failed" in m for m in gimp.get_state().messages)
 
 
 # ---------------------------------------------------------------------------
@@ -797,22 +824,25 @@ class TestTempProcedureRegistration:
         gp_register_temp_procedures(plugin)
         # Each of the three named procs + the settings proc are registered.
         registered = set(gimp.get_state().temp_procedures.keys())
-        expected = set(_GP_TEMP_PROCEDURES.keys()) | {
-            "gimppresence_open_settings",
-        }
+        expected = set(_GP_TEMP_PROCEDURES.keys()) | {SETTINGS_PROC_NAME}
         assert registered == expected
         assert gp._GP_TEMP_PROCEDURES_REGISTERED is True
 
-    def test_register_pin_image_uses_image_procedure(self, gimp):
+    def test_register_all_temp_procs_set_image_types_wildcard(self, gimp):
+        """Regression for the GIMP error 'attempted to install <Image>
+        procedure X which does not take the standard <Image> plug-in's
+        arguments': every temp procedure registered under <Image>/Filters/
+        must be an ImageProcedure with set_image_types("*"). Mixing in
+        plain Gimp.Procedure under the same menu path fails registration."""
         plugin = gimp.PlugIn()
         gp_register_temp_procedures(plugin)
-        # Test the *kind* of factory used. Both factories produce
-        # _BaseProcedure instances in our fake, so this only verifies the
-        # registration happened — the C-level distinction would be in
-        # ImageProcedure.new vs Procedure.new.
-        pin = gimp.get_state().temp_procedures.get("gimppresence_pin_image")
-        assert pin is not None
-        assert pin.proc_type == gimp.PDBProcType.TEMPORARY
+        for name in _GP_TEMP_PROCEDURES:
+            proc = gimp.get_state().temp_procedures.get(name)
+            assert proc is not None, f"{name} not registered"
+            assert proc.image_types == "*", (
+                f"{name} missing set_image_types('*') — GIMP would refuse "
+                "the <Image>/ menu path registration"
+            )
 
     def test_register_attaches_menu_paths(self, gimp):
         plugin = gimp.PlugIn()
@@ -980,7 +1010,7 @@ class TestBuildSettingsProcedure:
             settings_json_path=tmp_path / "prefs.json",
             on_settings_changed=None,
         )
-        assert proc.name == "gimppresence_open_settings"
+        assert proc.name == SETTINGS_PROC_NAME  # kebab-case to match other procs
         assert proc.proc_type == gimp.PDBProcType.TEMPORARY
         assert proc.menu_label is not None
         assert any("Discord Presence" in p for p in proc.menu_paths)

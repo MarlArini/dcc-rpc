@@ -733,6 +733,35 @@ def test_jsonsharedsettings_write_through_setattr(tmp_path):
     assert on_disk["interval"] == 42  # other fields preserved
 
 
+def test_jsonsharedsettings_flush_writes_synchronously(tmp_path):
+    """flush() should bypass the 2s debounce and persist immediately. Used
+    by menu toggle helpers (NKMenu.start/stop, sp_pause_presence, etc.) so
+    a fast app close right after the toggle doesn't lose the change."""
+    p = tmp_path / "prefs.json"
+    p.write_text(_json.dumps({"name": "loaded", "interval": 42, "enabled": True}))
+    s = _SettingsForLoadTest()
+    s.setup_persistence(str(p), app_name="test")
+    s.enabled = False
+    # The QTimer is started but won't fire without an event loop spinning;
+    # flush() must persist regardless.
+    s.flush()
+    on_disk = _json.loads(p.read_text())
+    assert on_disk["enabled"] is False
+
+
+def test_jsonsharedsettings_flush_stops_pending_timer(tmp_path):
+    """flush() should cancel the pending debounce so the timer can't fire a
+    duplicate write later."""
+    p = tmp_path / "prefs.json"
+    p.write_text(_json.dumps({"name": "loaded", "interval": 42, "enabled": True}))
+    s = _SettingsForLoadTest()
+    s.setup_persistence(str(p), app_name="test")
+    s.name = "modified"
+    assert s._timer.isActive()
+    s.flush()
+    assert not s._timer.isActive()
+
+
 def test_jsonsharedsettings_reset_restores_defaults(tmp_path):
     """reset() should restore _INITIAL_DEFAULTS where present and field
     defaults elsewhere."""

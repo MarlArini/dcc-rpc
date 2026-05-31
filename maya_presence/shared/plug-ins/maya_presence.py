@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import ClassVar, List, cast, Tuple, Any, get_type_hints
+from typing import ClassVar, List, cast, Tuple, Any, get_type_hints, Dict
 
 from pypresence.presence import Presence
 
@@ -72,44 +72,11 @@ class MPSettings(MPSharedSettings):
         default=True,
         metadata={"group": "Details", "label": "Display frames rendered in details"},
     )
-    countArnold: bool = field(
+    countExtensions: bool = field(
         default=True,
         metadata={
             "group": "Render Extensions",
-            "label": (
-                "Count lights, materials, and textures from Arnold, if it is "
-                + "installed and enabled"
-            ),
-        },
-    )
-    countRS: bool = field(
-        default=True,
-        metadata={
-            "group": "Render Extensions",
-            "label": (
-                "Count lights, materials, and textures from Redshift, if it is "
-                + "installed and enabled"
-            ),
-        },
-    )
-    countPxr: bool = field(
-        default=True,
-        metadata={
-            "group": "Render Extensions",
-            "label": (
-                "Count lights, materials, and textures from RenderMan, if it is "
-                + "installed and enabled"
-            ),
-        },
-    )
-    countVRay: bool = field(
-        default=True,
-        metadata={
-            "group": "Render Extensions",
-            "label": (
-                "Count lights, materials, and textures from V-Ray, if it is "
-                + "installed and enabled"
-            ),
+            "label": ("Count lights, materials, and textures from third-party renderers"),
         },
     )
     _PREFIX: ClassVar[str] = "mayaPresence_"
@@ -128,7 +95,10 @@ class MPSettings(MPSharedSettings):
         ("Active object", "active"),
         ("Current tool context", "context"),
     ]
-    _INITIAL_DEFAULTS: ClassVar[dict] = {"detailsType": "scene", "stateType": "poly"}
+    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
+        "detailsType": "scene",
+        "stateType": "poly",
+    }
 
     def __post_init__(self):
         field_types = get_type_hints(MPSettings)
@@ -188,10 +158,10 @@ MP_UPDATE_DETAILS = MPRPCUpdate("maya")
 
 class MPExtensionMonitor:
     """
-    Watch known render engine plugins (Redshift, Arnold, V-Ray, RenderMan). We
-    maintain whether the engine is loaded and a list of its custom types, so
+    Watch known render engine plugins (Redshift, Arnold, V-Ray, RenderMan, Octane).
+    We maintain whether the engine is loaded and a list of its custom types, so
     if the user enables counting lights, materials, or textures from the engine
-    we can iterate the types and count them with cmds.ls
+    we can iterate the types and count them with `cmds.ls`
     """
 
     class Engine:
@@ -199,14 +169,12 @@ class MPExtensionMonitor:
             self,
             pn: str,
             rn: str,
-            sn: str,
             light_path=None,
             mat_path=None,
             tex_path=None,
         ):
             self.plugin_name = pn
             self.registry_name = rn
-            self.mp_setting_name = sn
             self.light_path = light_path or f"rendernode/{rn}/light"
             self.material_path = mat_path or f"rendernode/{rn}/shader"
             self.texture_path = tex_path or f"rendernode/{rn}/texture"
@@ -220,16 +188,21 @@ class MPExtensionMonitor:
 
     def __init__(self):
         self.monitored_engines = {
-            "Redshift": self.Engine("redshift4maya", "redshift", "countRS"),
-            "Arnold": self.Engine("mtoa", "arnold", "countArnold"),
-            "V-Ray": self.Engine("vrayformaya", "vray", "countVRay"),
+            "Redshift": self.Engine("redshift4maya", "redshift"),
+            "Arnold": self.Engine("mtoa", "arnold"),
+            "V-Ray": self.Engine("vrayformaya", "vray"),
             "RenderMan": self.Engine(
                 "RenderMan_For_Maya",
                 "renderman",
-                "countPxr",
                 mat_path="rendernode/renderman/bxdf",
                 tex_path="rendernode/renderman/pattern",
             ),
+            "Octane": self.Engine(
+                "octaneplugin",
+                "octane",
+                mat_path="rendernode/octane/material",
+                light_path="rendernode/octane/node" # some non-light stuff in here - worth refactor?
+            )
         }
 
     def init_engine(self, e: str):
@@ -249,7 +222,7 @@ class MPExtensionMonitor:
         for engine in self.monitored_engines.values():
             if (
                 engine.loaded
-                and getattr(MP_PREFS, engine.mp_setting_name, False)
+                and MP_PREFS.countExtensions
                 and engine.types is not None
             ):
                 types += engine.types[category.name.lower()]
@@ -345,11 +318,14 @@ class MPContext:
             else:
                 verts = polys["vertex"]
                 faces = polys["face"]
-        vert_str = "vert" if int(verts) == 1 else "verts"
-        verts = mp_shorten_number(int(verts))
-        face_str = "face" if int(faces) == 1 else "faces"
-        faces = mp_shorten_number(int(faces))
-        return f"{verts} {vert_str} | {faces} {face_str}"
+        try:
+            vert_str = "vert" if int(verts) == 1 else "verts"
+            verts = mp_shorten_number(int(verts))
+            face_str = "face" if int(faces) == 1 else "faces"
+            faces = mp_shorten_number(int(faces))
+            return f"{verts} {vert_str} | {faces} {face_str}"
+        except ValueError: # For some reason during startup verts is occasionally a string
+            return "Unknown polygon count"
 
     def get_joint_count(self) -> str:
         joints = len(cmds.ls(type="joint"))
@@ -664,9 +640,11 @@ def mp_open_settings_menu():
     mp_show_settings_dialog(MP_PREFS, on_change=mp_push_rpc_update)
 
 
-def mp_install_settings_menu():
+def _mp_add_settings_menu_item():
+    """Add the settings menuItem under mainWindowMenu. Called from the PMC
+    the first time the user opens the Window menu, or directly by tests."""
     if cmds.menuItem("mayaPresenceSettingsMenuItem", exists=True):
-        cmds.deleteUI("mayaPresenceSettingsMenuItem", menuItem=True)
+        return
     cmds.menuItem(
         "mayaPresenceSettingsMenuItem",
         label="Maya Presence Settings…",
@@ -675,9 +653,45 @@ def mp_install_settings_menu():
     )
 
 
+# MEL fragment appended to mainWindowMenu's post-menu callback.
+# Same approach as MayaUSD's addMenuCallback / mayaUsdMenu_windowMenuCallback.
+MP_MENU_PMC = (
+    f'python("try:","\timport maya_presence as _mp",'
+    f'"\t_mp.{_mp_add_settings_menu_item.__name__}()","except:","\tpass")'
+)
+
+
+def mp_install_settings_menu():
+    """Append a post-menu callback to mainWindowMenu instead of inserting the
+    menuItem now."""
+    try:
+        existing_pmc = (
+            cmds.menu("mainWindowMenu", query=True, postMenuCommand=True) or ""
+        )
+    except RuntimeError:
+        return
+    if MP_MENU_PMC in existing_pmc:
+        return  # already hooked
+    cmds.menu("mainWindowMenu", edit=True, postMenuCommand=existing_pmc + ";;" + MP_MENU_PMC)
+
+
 def mp_uninstall_settings_menu():
+    """Remove our menuItem AND strip our PMC fragment, so the Window menu's
+    post-menu callback doesn't try to recreate the item on the next open."""
     if cmds.menuItem("mayaPresenceSettingsMenuItem", exists=True):
         cmds.deleteUI("mayaPresenceSettingsMenuItem", menuItem=True)
+    try:
+        existing_pmc = (
+            cmds.menu("mainWindowMenu", query=True, postMenuCommand=True) or ""
+        )
+    except RuntimeError:
+        return
+    new_pmc = existing_pmc.replace(MP_MENU_PMC, "")
+    if new_pmc != existing_pmc:
+        try:
+            cmds.menu("mainWindowMenu", edit=True, postMenuCommand=new_pmc)
+        except RuntimeError:
+            pass
 
 
 ###################
@@ -696,7 +710,7 @@ def mp_wrap_mel(py_call: str) -> str:
     """
     return (
         f"{MP_HOOK_START} "
-        f'python("try:","\timport {__name__} as _mp","\t_mp.{py_call}","except:","\tpass")'
+        f'python("try:","\timport maya_presence as _mp","\t_mp.{py_call}","except:","\tpass")'
         f"{MP_HOOK_END}"
     )
 
@@ -719,7 +733,7 @@ def mp_check_render_handlers_installed() -> bool:
 def mp_install_render_handlers(*args):  # pylint: disable=unused-argument
     """
     Add hooks to the preMel, postMel, and postRenderMel events that will update the session
-    information when rendering starts and ends, and when a frame finishes rendering. Use 
+    information when rendering starts and ends, and when a frame finishes rendering. Use
     __name__ on the functions instead of passing as strings to prevent unused import messages
     and accidental deletion of the imports, making the calls fail at runtime.
     """
@@ -804,32 +818,16 @@ def mp_observe_plugin_unload(string_array, clientData):  # pylint: disable=unuse
 def mp_add_callbacks():
     """
     Register all callbacks.
-    1. kBeforeSave: temporarily remove the render handlers. This way, other users
-    who open the scene and who do not have the plugin will not have callbacks.
-    2. kAfterNew, kAfterOpen, kAfterSave: Add the render handlers.
-    3. kAfterPluginLoad: check if the plugin clobbered the callbacks. Also,
-    check if the plugin is a known render engine (Arnold, Redshift, V-Ray, RMan)
-    and, if so, flag this to possibly enable counting engine-specific types
-    4. kAfterPluginUnload: check if hooks were clobbered on unload, and if a
-    monitored engine is no longer present.
+    1. kAfterNew, kAfterOpen: Add the render handlers to fresh / opened
+       scenes if displayRenderStats is on. The handlers stay in the scene
+       across saves.
+    2. kAfterPluginLoad: check if the plugin clobbered the callbacks. Also,
+       check if the plugin is a known render engine (Arnold, Redshift, V-Ray,
+       RMan) and, if so, flag this to possibly enable counting engine-specific
+       types.
+    3. kAfterPluginUnload: check if hooks were clobbered on unload, and if a
+       monitored engine is no longer present.
     """
-    MP_CALLBACKS.add(
-        (
-            "kBeforeSave",
-            om.MSceneMessage.addCallback(
-                om.MSceneMessage.kBeforeSave,
-                mp_uninstall_render_handlers,
-            ),
-        )
-    )
-    MP_CALLBACKS.add(
-        (
-            "kAfterSave",
-            om.MSceneMessage.addCallback(
-                om.MSceneMessage.kAfterSave, mp_install_render_handlers
-            ),
-        )
-    )
     MP_CALLBACKS.add(
         (
             "kAfterNew",

@@ -55,6 +55,13 @@ class PDBStatusType(enum.Enum):
     CANCEL = 4
 
 
+class MessageHandlerType(enum.Enum):
+    """Subset of Gimp.MessageHandlerType used by settings_dialog._gp_warn."""
+    MESSAGE_BOX = 0
+    CONSOLE = 1
+    ERROR_CONSOLE = 2
+
+
 # ---------------------------------------------------------------------------
 # Domain types
 # ---------------------------------------------------------------------------
@@ -125,6 +132,12 @@ class Image:  # exposed as Gimp.Image
         # GIMP's get_resolution returns (success, xres, yres).
         return self._resolution
 
+    @staticmethod
+    def id_is_valid(image_id: int) -> bool:
+        """Real GIMP: returns True iff `image_id` belongs to an open image.
+        Fake: walks _state.images for a matching id."""
+        return any(img._id == image_id for img in _state.images)
+
 
 @dataclass
 class _Brush:
@@ -154,6 +167,9 @@ class _BaseProcedure:
         self.attribution: Optional[Tuple[str, str, str]] = None
         self.documentation: Optional[Tuple] = None
         self.menu_paths: List[str] = []
+        # ImageProcedure-specific: image color modes accepted for invocation.
+        # None = not set (plain Procedure); "*" = any mode.
+        self.image_types: Optional[str] = None
         self.arguments: List[Tuple] = []  # (kind, name, label, blurb, default, extras)
         self.choice_arguments: Dict[str, Any] = {}
         self.persistent_ready_called = False
@@ -169,6 +185,11 @@ class _BaseProcedure:
 
     def add_menu_path(self, path: str) -> None:
         self.menu_paths.append(path)
+
+    def set_image_types(self, types: str) -> None:
+        """ImageProcedure-only in real GIMP; we accept it on the shared
+        fake class so tests can verify it was called."""
+        self.image_types = types
 
     def add_boolean_argument(self, name, label, blurb, default, flags):
         self.arguments.append(("boolean", name, label, blurb, default, flags))
@@ -195,10 +216,11 @@ class _BaseProcedure:
 
 class _ProcedureFactory:
     """Stand-in for the Gimp.Procedure / Gimp.ImageProcedure classes whose
-    `.new(plugin, name, type, run_fn, run_data)` is a constructor."""
+    `.new(plugin, name, type, run_fn, run_data=None)` is a constructor.
+    `run_data` is optional in real GIMP and the plug-in calls without it."""
 
     @staticmethod
-    def new(plug_in, name, proc_type, run_fn, run_data):
+    def new(plug_in, name, proc_type, run_fn, run_data=None):
         return _BaseProcedure(plug_in, name, proc_type, run_fn, run_data)
 
 
@@ -264,6 +286,13 @@ class _State:
     temp_procedures: Dict[str, _BaseProcedure] = field(default_factory=dict)
     persistent_enable_called: bool = False
     main_called_with: Optional[Tuple[Any, list]] = None
+    # _gp_warn machinery: tracks the current handler and every message sent.
+    message_handler: MessageHandlerType = MessageHandlerType.ERROR_CONSOLE
+    messages: List[str] = field(default_factory=list)
+    # When True, message_set_handler returns False (simulates a host
+    # rejecting the handler change so _gp_warn falls through to its
+    # MESSAGE_BOX guard).
+    message_set_handler_fails: bool = False
 
 
 _state = _State()
@@ -312,6 +341,24 @@ def warning(msg: str, *args) -> None:
     # additional args (printf-style mistake) — preserve them for tests but
     # don't attempt to interpolate.
     _state.warnings.append(msg if not args else f"{msg} | extra args: {args!r}")
+
+
+def message(msg: str) -> None:
+    """Record a message routed through the current handler."""
+    _state.messages.append(msg)
+
+
+def message_get_handler() -> MessageHandlerType:
+    return _state.message_handler
+
+
+def message_set_handler(handler: MessageHandlerType) -> bool:
+    """Set the handler. Returns True on success; tests can flip
+    _state.message_set_handler_fails to exercise the failure branch."""
+    if _state.message_set_handler_fails:
+        return False
+    _state.message_handler = handler
+    return True
 
 
 def context_get_brush() -> _Brush:

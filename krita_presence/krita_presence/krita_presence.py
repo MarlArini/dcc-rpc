@@ -45,7 +45,7 @@ class KPSettings(SharedSettings, ColoredIconSettings):
         ("Layer blend mode", "layer_blend"),
         ("Total time on document", "document_time"),
     ]
-    _INITIAL_DEFAULTS: ClassVar[dict] = {
+    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
         "detailsType": "doc_name",
         "stateType": "layer_info",
     }

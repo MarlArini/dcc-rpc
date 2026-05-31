@@ -88,6 +88,9 @@ class _State:
 
     # UI bookkeeping
     menu_items: Dict[str, dict] = field(default_factory=dict)
+    # Maya parent menus (e.g. "mainWindowMenu") whose -pmc (postMenuCommand)
+    # string the plugin appends a fragment to. Each entry: {pmc: "..."}.
+    menus: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 _state = _State()
@@ -293,6 +296,25 @@ def menuItem(name: str = "", exists: bool = False, **kwargs):  # noqa: N802
 
 def deleteUI(name: str, menuItem: bool = False, **_) -> None:  # noqa: N802,N803
     _state.menu_items.pop(name, None)
+
+
+def evalDeferred(callable_or_str, **_) -> None:  # noqa: N802
+    """Fake: run the callable synchronously so tests see the effect immediately."""
+    if callable(callable_or_str):
+        callable_or_str()
+
+
+def menu(name: str, query: bool = False, edit: bool = False,  # noqa: N802
+         postMenuCommand: Any = None, **_) -> Any:  # noqa: N803
+    """Minimal stand-in for cmds.menu. Supports query/edit of postMenuCommand
+    on a named parent menu (e.g. mainWindowMenu) so the plugin's PMC-append
+    install path can be tested. Falls back to recording the menu existence."""
+    entry = _state.menus.setdefault(name, {"postMenuCommand": ""})
+    if query and postMenuCommand:
+        return entry.get("postMenuCommand", "")
+    if edit and postMenuCommand is not None:
+        entry["postMenuCommand"] = postMenuCommand
+    return name
 
 
 # ---------------------------------------------------------------------------

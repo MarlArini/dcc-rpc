@@ -514,8 +514,10 @@ def test_extension_monitor_count_zero_when_engine_not_loaded(cmds):
 
 
 def test_extension_monitor_count_uses_types_when_pref_enabled(cmds):
-    """When a loaded engine has its pref flag enabled, count() sums ls()
-    matches for the engine's type list."""
+    """When countExtensions is on, count() sums ls() matches across all
+    loaded engines' type lists. (The previous per-engine countArnold /
+    countRS / countPxr / countVRay flags were consolidated into a single
+    countExtensions toggle.)"""
     cmds.set_state(node_types_by_path={
         "rendernode/arnold/light": ["aiAreaLight"],
     })
@@ -523,13 +525,12 @@ def test_extension_monitor_count_uses_types_when_pref_enabled(cmds):
     mon.init_engine("Arnold")
     # ls(type=["aiAreaLight"]) needs to return some count.
     cmds.set_state(ls_results={("type_multi", ("aiAreaLight",)): ["lt1", "lt2"]})
-    # Toggle the Arnold pref on (it defaults to True, but make sure).
-    snap_arnold = MP_PREFS.countArnold
-    MP_PREFS.countArnold = True
+    snap = MP_PREFS.countExtensions
+    MP_PREFS.countExtensions = True
     try:
         assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 2
     finally:
-        MP_PREFS.countArnold = snap_arnold
+        MP_PREFS.countExtensions = snap
 
 
 def test_extension_monitor_count_zero_when_pref_disabled(cmds):
@@ -539,13 +540,13 @@ def test_extension_monitor_count_zero_when_pref_disabled(cmds):
     mon = MPExtensionMonitor()
     mon.init_engine("Arnold")
     cmds.set_state(ls_results={("type_multi", ("aiAreaLight",)): ["lt1"]})
-    snap_arnold = MP_PREFS.countArnold
-    MP_PREFS.countArnold = False
+    snap = MP_PREFS.countExtensions
+    MP_PREFS.countExtensions = False
     try:
         # Pref off => types excluded => count returns 0.
         assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 0
     finally:
-        MP_PREFS.countArnold = snap_arnold
+        MP_PREFS.countExtensions = snap
 
 
 # ---------------------------------------------------------------------------
@@ -1074,16 +1075,23 @@ def maya_callbacks_clean():
     MP_CALLBACKS.update(snap)
 
 
-def test_mp_add_callbacks_registers_six_events(maya_callbacks_clean):
-    """add_callbacks should register six MSceneMessage callbacks: kBeforeSave,
-    kAfterSave, kAfterNew, kAfterOpen, kAfterPluginLoad, kAfterPluginUnload."""
+def test_mp_add_callbacks_registers_expected_events(maya_callbacks_clean):
+    """add_callbacks registers four MSceneMessage callbacks: kAfterNew /
+    kAfterOpen (install render handlers into fresh or opened scenes) plus
+    kAfterPluginLoad / kAfterPluginUnload (monitor render-engine plugins).
+    kBeforeSave / kAfterSave used to be here for a remove-then-reinstall
+    dance around saves, but that kept the scene permanently dirty after
+    every save — handlers now persist across saves and the try/except MEL
+    wrapper keeps non-plugin collaborators from seeing errors."""
     MP_CALLBACKS.clear()
     mp_add_callbacks()
     names = {name for name, _ in MP_CALLBACKS}
     assert names == {
-        "kBeforeSave", "kAfterSave", "kAfterNew", "kAfterOpen",
-        "kAfterPluginLoad", "kAfterPluginUnload",
+        "kAfterNew", "kAfterOpen", "kAfterPluginLoad", "kAfterPluginUnload",
     }
+    # kBeforeSave / kAfterSave are intentionally absent now.
+    assert "kBeforeSave" not in names
+    assert "kAfterSave" not in names
     # Each entry has a unique callback id (an int from the fake).
     ids = [cid for _, cid in MP_CALLBACKS]
     assert len(set(ids)) == len(ids)
@@ -1092,7 +1100,7 @@ def test_mp_add_callbacks_registers_six_events(maya_callbacks_clean):
 def test_mp_remove_callbacks_clears_set(maya_callbacks_clean):
     MP_CALLBACKS.clear()
     mp_add_callbacks()
-    assert len(MP_CALLBACKS) == 6
+    assert len(MP_CALLBACKS) == 4
     mp_remove_callbacks()
     assert len(MP_CALLBACKS) == 0
 
@@ -1166,13 +1174,13 @@ def test_extension_monitor_count_handles_none_listnodetypes(cmds):
     })
     mon = MPExtensionMonitor()
     mon.init_engine("Arnold")
-    snap_arnold = MP_PREFS.countArnold
-    MP_PREFS.countArnold = True
+    snap = MP_PREFS.countExtensions
+    MP_PREFS.countExtensions = True
     try:
         # Should treat the missing light category as zero, not crash.
         assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 0
     finally:
-        MP_PREFS.countArnold = snap_arnold
+        MP_PREFS.countExtensions = snap
 
 
 def test_uninstall_render_handlers_skips_empty_attrs_correctly(cmds):

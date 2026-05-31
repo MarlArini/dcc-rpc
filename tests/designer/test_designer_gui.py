@@ -361,9 +361,9 @@ def test_dialog_combobox_populated_with_designer_info_choices(dialog):
 
 
 def test_dialog_combobox_initial_value_from_initial_defaults(dialog):
-    """_INITIAL_DEFAULTS pins detailsType='project' and stateType='node_count'."""
-    assert dialog._gui_widgets["detailsType"].currentData() == "project"
-    assert dialog._gui_widgets["stateType"].currentData() == "node_count"
+    """_INITIAL_DEFAULTS pins detailsType='package' and stateType='graph'."""
+    assert dialog._gui_widgets["detailsType"].currentData() == "package"
+    assert dialog._gui_widgets["stateType"].currentData() == "graph"
 
 
 # ---------------------------------------------------------------------------
@@ -418,8 +418,8 @@ def test_reset_restores_initial_defaults_combobox(dialog, prefs_snapshot, monkey
         staticmethod(lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes),
     )
     dialog._on_reset_clicked()
-    assert prefs_snapshot.stateType == "node_count"
-    assert dialog._gui_widgets["stateType"].currentData() == "node_count"
+    assert prefs_snapshot.stateType == "graph"
+    assert dialog._gui_widgets["stateType"].currentData() == "graph"
 
 
 def test_reset_restores_base_defaults(dialog, prefs_snapshot, monkeypatch):

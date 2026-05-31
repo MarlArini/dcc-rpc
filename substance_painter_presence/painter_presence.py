@@ -9,7 +9,7 @@ import atexit
 from dataclasses import dataclass
 import os
 import time
-from typing import Callable, ClassVar, Dict, List, Tuple
+from typing import Callable, ClassVar, Dict, List, Tuple, Any
 import PySide6.QtGui as QtG
 import PySide6.QtWidgets as QtW
 import substance_painter as sp  # pylint: disable=import-error
@@ -75,7 +75,7 @@ class SPSettings(ColoredIconSettings, SharedSettings, JSONSharedSettings):
         ("Active layer info", "layer_info"),
         ("Active brush alpha", "brush_alpha")
     ]
-    _INITIAL_DEFAULTS: ClassVar[Dict[str, str]] = {
+    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
         "detailsType": "project",
         "stateType": "texset_info",
     }
@@ -185,7 +185,7 @@ class SPPlugin(RPCBasePlugin):
             ):
                 self.details.small_icon_text = f"Painting in {mat}"
 
-    def update_large_icon(self, ctx):
+    def update_large_icon(self, ctx): #pylint: disable=unused-argument
         if self.prefs.displayVersion:
             self.details.large_icon_text = (
                 f"Adobe Substance Painter {sp.application.version()}"
@@ -463,6 +463,7 @@ def sp_open_settings_menu():
 
 def sp_pause_presence():
     SP_PLUGIN.prefs.generalEnable = False
+    SP_PLUGIN.prefs.flush()
     if SP_START_ACTION is not None:
         SP_START_ACTION.setEnabled(True)
     if SP_STOP_ACTION is not None:
@@ -471,6 +472,7 @@ def sp_pause_presence():
 
 def sp_restart_presence():
     SP_PLUGIN.prefs.generalEnable = True
+    SP_PLUGIN.prefs.flush()
     if SP_START_ACTION is not None:
         SP_START_ACTION.setEnabled(False)
     if SP_STOP_ACTION is not None:
@@ -535,22 +537,18 @@ def sp_install_settings_menu():
         SP_START_ACTION.triggered.connect(sp_restart_presence)
         SP_STOP_ACTION.triggered.connect(sp_pause_presence)
         SP_PLUGIN.menubar_item = plugin_menu
-    except Exception:
-        sp.logging.warning("[PainterPresence] Unable to install settings menu.")
+    except Exception as e:
+        sp.logging.warning(f"[PainterPresence] Unable to install settings menu: {e}")
 
 
 def sp_uninstall_settings_menu():
     sp_close_settings_menu()
-    # Don't trust SP_PLUGIN.menubar_item — the host's plugin reload can leave
-    # that wrapper in a "C++ object already deleted" state even while the
-    # underlying QMenu is still parented to the menu bar. Locating the menu
-    # by title walks the live menu bar and is robust to that case.
     try:
         main_window = sp.ui.get_main_window()
         menu_bar = main_window.menuBar()
         _sp_remove_discord_menu(menu_bar)
-    except Exception:
-        sp.logging.warning("[PainterPresence] Unable to uninstall settings menu.")
+    except Exception as e:
+        sp.logging.warning(f"[PainterPresence] Unable to uninstall settings menu: {e}")
     SP_PLUGIN.menubar_item = None
 
 

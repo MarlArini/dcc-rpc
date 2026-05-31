@@ -93,51 +93,107 @@ def dialog(prefs_snapshot):
 # ---------------------------------------------------------------------------
 
 
-def test_install_settings_menu_registers_menu_item(cmds):
-    mp.mp_install_settings_menu()
-    assert "mayaPresenceSettingsMenuItem" in cmds.get_state().menu_items
+# mp_install_settings_menu installs a post-menu callback (PMC) on
+# mainWindowMenu instead of creating the menuItem directly. The actual
+# menuItem creation happens in _mp_add_settings_menu_item, which the PMC
+# runs the first time the user opens the Window menu. This mirrors how
+# MayaUSD avoids racing with Maya's main-menu construction.
 
 
-def test_install_settings_menu_uses_main_window_menu_parent(cmds):
+def test_install_settings_menu_appends_pmc_fragment(cmds):
+    """install should append MP_MENU_PMC to mainWindowMenu's postMenuCommand
+    rather than touching the menu's children. The fragment is what gets
+    evaluated when the user first opens the Window menu."""
     mp.mp_install_settings_menu()
+    pmc = cmds.menu("mainWindowMenu", query=True, postMenuCommand=True)
+    assert mp.MP_MENU_PMC in pmc
+
+
+def test_install_settings_menu_idempotent(cmds):
+    """A second install must not double-append the PMC fragment."""
+    mp.mp_install_settings_menu()
+    pmc_after_one = cmds.menu("mainWindowMenu", query=True, postMenuCommand=True)
+    mp.mp_install_settings_menu()
+    pmc_after_two = cmds.menu("mainWindowMenu", query=True, postMenuCommand=True)
+    assert pmc_after_one == pmc_after_two
+    assert pmc_after_two.count(mp.MP_MENU_PMC) == 1
+
+
+def test_install_preserves_existing_pmc_callbacks(cmds):
+    """install must append, not replace — other plug-ins' PMC fragments
+    have to stay intact."""
+    cmds.menu(
+        "mainWindowMenu", edit=True,
+        postMenuCommand="print('other plugin');",
+    )
+    mp.mp_install_settings_menu()
+    pmc = cmds.menu("mainWindowMenu", query=True, postMenuCommand=True)
+    assert "print('other plugin');" in pmc
+    assert mp.MP_MENU_PMC in pmc
+
+
+def test_install_settings_menu_does_not_register_menu_item_directly(cmds):
+    """install only appends the PMC; the menuItem itself isn't created
+    until the PMC runs."""
+    mp.mp_install_settings_menu()
+    assert "mayaPresenceSettingsMenuItem" not in cmds.get_state().menu_items
+
+
+def test_add_settings_menu_item_registers_under_main_window_menu(cmds):
+    """The PMC callback (or a direct test invocation) creates the actual
+    menuItem under mainWindowMenu."""
+    mp._mp_add_settings_menu_item()
     item = cmds.get_state().menu_items["mayaPresenceSettingsMenuItem"]
     assert item["parent"] == "mainWindowMenu"
-
-
-def test_install_settings_menu_label(cmds):
-    mp.mp_install_settings_menu()
-    item = cmds.get_state().menu_items["mayaPresenceSettingsMenuItem"]
     assert item["label"] == "Maya Presence Settings…"
-
-
-def test_install_settings_menu_attaches_command(cmds):
-    """The command should be a callable; firing it opens the settings dialog."""
-    mp.mp_install_settings_menu()
-    item = cmds.get_state().menu_items["mayaPresenceSettingsMenuItem"]
     assert callable(item["command"])
 
 
-def test_install_replaces_existing_menu_item(cmds, menu_state_clean):
-    """If the menu item is already present, install should delete the previous
-    entry before re-adding it (pins the 'no duplicate menu items' contract)."""
-    mp.mp_install_settings_menu()
-    # Pretend the user changed something we want to verify gets refreshed.
-    cmds.get_state().menu_items["mayaPresenceSettingsMenuItem"]["label"] = "STALE"
-    mp.mp_install_settings_menu()
-    item = cmds.get_state().menu_items["mayaPresenceSettingsMenuItem"]
-    assert item["label"] == "Maya Presence Settings…"
+def test_add_settings_menu_item_idempotent(cmds):
+    """Re-running the add path (e.g., the PMC firing on every menu open)
+    must not register duplicate menuItems."""
+    mp._mp_add_settings_menu_item()
+    mp._mp_add_settings_menu_item()
+    assert "mayaPresenceSettingsMenuItem" in cmds.get_state().menu_items
 
 
-def test_uninstall_settings_menu_removes_item(cmds):
+def test_uninstall_strips_pmc_fragment(cmds):
+    """uninstall must remove our PMC fragment so a future Window-menu open
+    doesn't recreate the item we just deleted."""
     mp.mp_install_settings_menu()
+    assert mp.MP_MENU_PMC in cmds.menu(
+        "mainWindowMenu", query=True, postMenuCommand=True
+    )
+    mp.mp_uninstall_settings_menu()
+    pmc = cmds.menu("mainWindowMenu", query=True, postMenuCommand=True)
+    assert mp.MP_MENU_PMC not in pmc
+
+
+def test_uninstall_strips_pmc_but_leaves_other_callbacks(cmds):
+    """uninstall must remove only our fragment, not the whole PMC."""
+    cmds.menu(
+        "mainWindowMenu", edit=True,
+        postMenuCommand="print('other plugin');",
+    )
+    mp.mp_install_settings_menu()
+    mp.mp_uninstall_settings_menu()
+    pmc = cmds.menu("mainWindowMenu", query=True, postMenuCommand=True)
+    assert "print('other plugin');" in pmc
+    assert mp.MP_MENU_PMC not in pmc
+
+
+def test_uninstall_removes_menu_item_if_present(cmds):
+    """uninstall must also clean up the actual menuItem if the PMC already
+    fired and created it."""
+    mp._mp_add_settings_menu_item()
     assert "mayaPresenceSettingsMenuItem" in cmds.get_state().menu_items
     mp.mp_uninstall_settings_menu()
     assert "mayaPresenceSettingsMenuItem" not in cmds.get_state().menu_items
 
 
 def test_uninstall_no_op_when_not_installed(cmds):
-    """When the menu item isn't present, uninstall short-circuits — no
-    exception."""
+    """When neither the PMC fragment nor the menuItem is present, uninstall
+    must not raise."""
     assert "mayaPresenceSettingsMenuItem" not in cmds.get_state().menu_items
     mp.mp_uninstall_settings_menu()
 
@@ -166,10 +222,12 @@ def test_open_settings_menu_replaces_existing(menu_state_clean):
 
 def test_install_command_opens_dialog(cmds, menu_state_clean):
     """Wire test: firing the registered menuItem's command path should result
-    in MP_SETTINGS_WINDOW being populated. We invoke the command the same
-    way Maya would (with a positional 'state' arg the lambda ignores)."""
+    in MP_SETTINGS_WINDOW being populated. The menuItem itself is created by
+    _mp_add_settings_menu_item (what the PMC would call on first menu open);
+    we invoke it directly here, then trigger the command the same way Maya
+    would (with a positional 'state' arg the lambda ignores)."""
     mp.MP_SETTINGS_WINDOW = None
-    mp.mp_install_settings_menu()
+    mp._mp_add_settings_menu_item()
     cmd = cmds.get_state().menu_items["mayaPresenceSettingsMenuItem"]["command"]
     cmd(None)
     assert isinstance(mp.MP_SETTINGS_WINDOW, mp.MayaPresenceSettings)
@@ -229,12 +287,13 @@ def test_dialog_includes_maya_specific_details_fields(dialog):
         assert isinstance(dialog._gui_widgets[name], QtWidgets.QCheckBox)
 
 
-def test_dialog_render_extensions_group_has_four_engines(dialog):
-    """countArnold/countRS/countPxr/countVRay live in 'Render Extensions'."""
+def test_dialog_render_extensions_group_has_single_toggle(dialog):
+    """The per-engine countArnold/countRS/countPxr/countVRay fields were
+    consolidated into one countExtensions checkbox covering all third-party
+    renderers."""
     ext_fields = {f.name for f in dialog._groups["Render Extensions"]}
-    assert ext_fields == {"countArnold", "countRS", "countPxr", "countVRay"}
-    for name in ext_fields:
-        assert isinstance(dialog._gui_widgets[name], QtWidgets.QCheckBox)
+    assert ext_fields == {"countExtensions"}
+    assert isinstance(dialog._gui_widgets["countExtensions"], QtWidgets.QCheckBox)
 
 
 def test_dialog_combobox_populated_with_maya_info_choices(dialog):
@@ -278,12 +337,11 @@ def test_details_master_controls_maya_extra_fields(dialog):
 
 
 def test_render_extensions_group_has_no_master(dialog):
-    """The Render Extensions group has no group_master — none of its fields
-    are referenced as controllers. Pins that a future maintainer who decides
-    to add a master notices the test."""
+    """The Render Extensions group has no group_master — countExtensions
+    isn't referenced as a controller. Pins that a future maintainer who
+    decides to add a master notices the test."""
     controllers = dialog._controllers
-    for name in ("countArnold", "countRS", "countPxr", "countVRay"):
-        assert name not in controllers
+    assert "countExtensions" not in controllers
 
 
 def test_button2_disabled_widgets_grayed_by_default(dialog):
@@ -329,16 +387,16 @@ def test_reset_restores_initial_defaults_combobox(dialog, prefs_snapshot, monkey
 
 
 def test_reset_restores_maya_render_extension_default(dialog, prefs_snapshot, monkeypatch):
-    """countArnold defaults to True; flip it off, reset, expect True back."""
-    dialog._gui_widgets["countArnold"].setChecked(False)
-    assert prefs_snapshot.countArnold is False
+    """countExtensions defaults to True; flip it off, reset, expect True back."""
+    dialog._gui_widgets["countExtensions"].setChecked(False)
+    assert prefs_snapshot.countExtensions is False
     monkeypatch.setattr(
         QtWidgets.QMessageBox, "question",
         staticmethod(lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes),
     )
     dialog._on_reset_clicked()
-    assert prefs_snapshot.countArnold is True
-    assert dialog._gui_widgets["countArnold"].isChecked() is True
+    assert prefs_snapshot.countExtensions is True
+    assert dialog._gui_widgets["countExtensions"].isChecked() is True
 
 
 def test_reset_no_op_when_user_cancels(dialog, prefs_snapshot, monkeypatch):

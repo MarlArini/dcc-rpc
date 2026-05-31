@@ -10,7 +10,7 @@ import logging
 import atexit
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, List, Tuple, cast, Dict, Callable
+from typing import ClassVar, List, Tuple, cast, Dict, Callable, Any
 import PySide6.QtGui as QtG
 
 # pylint: disable=import-error
@@ -44,7 +44,7 @@ class SPSettings(SPSharedSettings, JSONSharedSettings):
         ("Resource count", "resource_count"),
         ("Color space", "color_space"),
     ]
-    _INITIAL_DEFAULTS = {"detailsType": "package", "stateType": "graph"}
+    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {"detailsType": "package", "stateType": "graph"}
     replaceUnderscores: bool = field(
         default=True,
         metadata={"group": "General", "label": "Replace _ in graph names with spaces"},
@@ -277,6 +277,7 @@ def sp_open_settings_menu():
 
 def sp_pause_presence():
     SP_PLUGIN.prefs.generalEnable = False
+    SP_PLUGIN.prefs.flush()
     if SP_START_ACTION is not None:
         SP_START_ACTION.setEnabled(True)
     if SP_STOP_ACTION is not None:
@@ -285,6 +286,7 @@ def sp_pause_presence():
 
 def sp_restart_presence():
     SP_PLUGIN.prefs.generalEnable = True
+    SP_PLUGIN.prefs.flush()
     if SP_START_ACTION is not None:
         SP_START_ACTION.setEnabled(False)
     if SP_STOP_ACTION is not None:
@@ -359,9 +361,10 @@ def sp_uninstall_settings_menu():
         return
     try:
         menu_bar = main_window.menuBar()
-    except RuntimeError as e:
+    except RuntimeError:
         SP_PLUGIN.logger.warning(
-            f"[DesignerPresence] Could not access menu bar during uninstall: {e}"
+            "[DesignerPresence] Could not access menu bar during uninstall:", 
+            exc_info=True
         )
         SP_PLUGIN.menubar_item = None
         return

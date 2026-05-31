@@ -22,7 +22,25 @@ import pytest
 
 # Importing the menu module triggers module-level setup: NK_PREFS, NK_MENU,
 # NK_WORKER thread, render callback installation. All goes through the fake.
-from nuke_presence.menu import NKContext
+from nuke_presence.menu import NKContext, NK_WORKER
+
+
+# ---------------------------------------------------------------------------
+# NK_WORKER thread lifecycle
+# ---------------------------------------------------------------------------
+
+def test_nk_worker_thread_started_at_import():
+    """Regression: NKBackgroundWorker.start() must be called at module load
+    (the worker's _run loop is the only thing that periodically calls
+    nk_update_presence — without it, Discord only ever sees the one update
+    fired manually by the settings-dialog reset path)."""
+    assert NK_WORKER._thread.is_alive()
+
+
+def test_nk_worker_thread_is_daemon():
+    """Daemon = True so the thread doesn't block Nuke from exiting on its
+    own; cleanup goes through atexit / NKMenu.stop, not thread.join."""
+    assert NK_WORKER._thread.daemon is True
 
 
 # ---------------------------------------------------------------------------
@@ -661,35 +679,16 @@ def test_nk_handle_active_node_unknown_class_returns_text(nk, nuke_globals_clean
 
 
 def test_nk_handle_active_node_known_class_in_cycle_defers_to_icon(nk, nuke_globals_clean):
-    """When the selected node's class is in NK_HD_ICONS and icons are on,
-    the cycle should return None so the text doesn't double up with the
-    small icon. Currently returns the text because node[0] (the name) is
-    checked against the class list and basically never matches."""
+    """When the selected node's class is in NK_ICONS and icons are on, the
+    cycle should return None so the text doesn't double up with the small
+    icon. (NK_HD_ICONS and NK_UPSCALED_ICONS were merged into a single
+    NK_ICONS catalog, and the disableUpscaledNodes pref was removed.)"""
     _NK_PREFS.detailsCycle = True
     _NK_PREFS.detailsType = "comp_name"  # not fixed-active
     _NK_PREFS.stateCycle = True
     _NK_PREFS.stateType = "comp_name"
     _NK_PREFS.displaySmallIcon = True
-    _NK_PREFS.disableUpscaledNodes = False
-    # 'Blur' is in NK_HD_ICONS, so the small icon will show "Blur1 (Blur)".
+    # 'Blur' is in NK_ICONS, so the small icon will show "Blur1 (Blur)".
     nk.set_state(selected_node=nk.make_node(name="Blur1", node_class="Blur"))
     ctx = NKContext()
     assert nk_handle_active_node(ctx) is None
-
-
-def test_nk_handle_active_node_upscaled_disabled_returns_text(nk, nuke_globals_clean):
-    """Class is in NK_UPSCALED_ICONS but the user disabled upscaled icons:
-    no icon will be shown, so the cycle should surface the text. (This passes
-    both with and without the node[0]/node[1] bug, since the bug accidentally
-    routes through the same return branch here — but it locks in the
-    contract for the post-fix code.)"""
-    _NK_PREFS.detailsCycle = True
-    _NK_PREFS.detailsType = "comp_name"
-    _NK_PREFS.stateCycle = True
-    _NK_PREFS.stateType = "comp_name"
-    _NK_PREFS.displaySmallIcon = True
-    _NK_PREFS.disableUpscaledNodes = True
-    # 'Roto' is in NK_UPSCALED_ICONS but not NK_HD_ICONS.
-    nk.set_state(selected_node=nk.make_node(name="Roto1", node_class="Roto"))
-    ctx = NKContext()
-    assert nk_handle_active_node(ctx) == "Roto1 (Roto)"

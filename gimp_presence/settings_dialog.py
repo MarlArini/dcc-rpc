@@ -1,10 +1,11 @@
 """
-GimpPresence settings dialog: rather than a custom GTK dialog, a procedure is registered 
-which presents all settings options and writes to JSON on save, additionally interrupting 
+GimpPresence settings dialog: rather than a custom GTK dialog, a procedure is registered
+which presents all settings options and writes to JSON on save, additionally interrupting
 the main (background) procedure's timer if the generalUpdate field was changed.
 
 Originally AI-generated (Claude Opus 4.7); human-modified and reviewed.
 """
+
 from __future__ import annotations
 import json
 import os
@@ -14,18 +15,37 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, get_type_hints
 
 import gi
+
 gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gimp, GimpUi, GLib, GObject, Gtk
 
 
-SETTINGS_PROC_NAME = "gimppresence_open_settings"
+SETTINGS_PROC_NAME = "gimppresence-open-settings"
+
+
+def _gp_warn(message: str):
+    message_handler = Gimp.message_get_handler()
+    if message_handler != Gimp.MessageHandlerType.ERROR_CONSOLE:
+        new_handler_success = Gimp.message_set_handler(
+            Gimp.MessageHandlerType.ERROR_CONSOLE
+        )
+        if (
+            not new_handler_success
+            and message_handler == Gimp.MessageHandlerType.MESSAGE_BOX
+        ):
+            return  # Users probably prefer silent RPC failure to a popup that might interrupt work
+        Gimp.message(message)
+        Gimp.message_set_handler(message_handler)  # Restore previous handler
+    else:
+        Gimp.message(message)
 
 
 # ---------------------------------------------------------------------------
 # Naming: camelCase dataclass field <-> kebab-case GObject property
 # ---------------------------------------------------------------------------
+
 
 def field_to_property(name: str) -> str:
     """Convert camelCase property names to kebab-case."""
@@ -44,6 +64,7 @@ def property_to_field(prop: str) -> str:
 # Atomic JSON write
 # ---------------------------------------------------------------------------
 
+
 def atomic_write_json(path: Path, data: dict) -> None:
     """Write `data` to `path` via tmp + rename so a crash mid-write can't
     leave a half-truncated file.
@@ -53,7 +74,9 @@ def atomic_write_json(path: Path, data: dict) -> None:
     with tmp.open("w", encoding="utf-8") as fp:
         json.dump(data, fp, indent=2)
         fp.flush()
-        os.fsync(fp.fileno())  # durability — survives a power loss between write and rename
+        os.fsync(
+            fp.fileno()
+        )  # durability — survives a power loss between write and rename
     os.replace(tmp, path)
 
 
@@ -61,10 +84,11 @@ def atomic_write_json(path: Path, data: dict) -> None:
 # Choice helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_choices(settings_class: Type, choices_attr: str) -> List[Tuple[str, str]]:
     """From a `choices_attr` metadata value, return a list of (label, key) pairs.
-      `choices_attr` should be a string name of a class attribute on settings_class 
-      that is itself a list of (label, key) tuples.
+    `choices_attr` should be a string name of a class attribute on settings_class
+    that is itself a list of (label, key) tuples.
     """
     choices = getattr(settings_class, choices_attr, None)
     if choices is None:
@@ -94,10 +118,17 @@ def _build_gimp_choice(label_key_pairs: Iterable[Tuple[str, str]]) -> "Gimp.Choi
 # Argument registration
 # ---------------------------------------------------------------------------
 
-# Field names we never want to expose as procedure arguments (private state
-# from JSONSharedSettings).
-_PRIVATE_FIELD_NAMES = {"_path", "_warn", "_timer", "_loaded", "_app_name",
-                        "_refresh_func", "_prev_interval"}
+# Field names we never want to expose as procedure arguments; the set is now
+# strictly defensive against any future Qt-bound mixin that reintroduces these.
+_PRIVATE_FIELD_NAMES = {
+    "_path",
+    "_warn",
+    "_timer",
+    "_loaded",
+    "_app_name",
+    "_refresh_func",
+    "_prev_interval",
+}
 
 
 def _initial_default(settings_class: Type, f: Field) -> Any:
@@ -128,9 +159,9 @@ def _blurb_for(f: Field) -> Optional[str]:
     return blurb if blurb else None
 
 
-def _register_field(procedure: "Gimp.Procedure",
-                    settings_class: Type,
-                    f: Field) -> None:
+def _register_field(
+    procedure: "Gimp.Procedure", settings_class: Type, f: Field
+) -> None:
     """Translate one dataclass field into the appropriate add_*_argument call."""
     prop_name = field_to_property(f.name)
     label = f.metadata.get("label") or f.name
@@ -143,7 +174,7 @@ def _register_field(procedure: "Gimp.Procedure",
     if kind == "checkbox":
         procedure.add_boolean_argument(prop_name, label, blurb, bool(default), flags)
     elif kind == "spinbox":
-        lo = int(f.metadata.get("min", -10**9))
+        lo = int(f.metadata.get("min", -(10**9)))
         hi = int(f.metadata.get("max", 10**9))
         procedure.add_int_argument(prop_name, label, blurb, lo, hi, int(default), flags)
     elif kind == "combobox":
@@ -160,8 +191,9 @@ def _register_field(procedure: "Gimp.Procedure",
         keys = {key for _, key in pairs}
         if default_key not in keys:
             default_key = pairs[0][1]
-        procedure.add_choice_argument(prop_name, label, blurb, gimp_choice,
-                                      default_key, flags)
+        procedure.add_choice_argument(
+            prop_name, label, blurb, gimp_choice, default_key, flags
+        )
     elif kind == "lineedit":
         procedure.add_string_argument(prop_name, label, blurb, str(default), flags)
     else:
@@ -171,6 +203,7 @@ def _register_field(procedure: "Gimp.Procedure",
 # ---------------------------------------------------------------------------
 # Dialog assembly (groups + conditional sensitivity)
 # ---------------------------------------------------------------------------
+
 
 def _group_layout(settings_class: Type) -> List[Tuple[str, List[Field]]]:
     """Return [(group_name, [field, field, ...]), ...] preserving declaration
@@ -190,19 +223,7 @@ def _group_layout(settings_class: Type) -> List[Tuple[str, List[Field]]]:
     return [(g, by_group[g]) for g in seen]
 
 
-def _fill_dialog(dialog: "GimpUi.ProcedureDialog",
-                 settings_class: Type) -> None:
-    """Lay out the dialog using fill_frame for groups + per-field sensitivity
-    sub-frames driven by metadata['group_master'] and metadata['controls'].
-
-    The strategy:
-      1. For each group, find the (zero or one) field with group_master=True.
-         If present, the group becomes a fill_frame whose title is that bool
-         and contents are the remaining fields.
-      2. Within a group, any field with `controls=[...]` becomes a sub-frame
-         whose title is that bool and contents are the listed fields.
-      3. Fields not absorbed by (1) or (2) are appended in declaration order.
-    """
+def _fill_dialog(dialog: "GimpUi.ProcedureDialog", settings_class: Type) -> None:
     top_level_ids: List[str] = []
 
     for group_name, group_fields in _group_layout(settings_class):
@@ -210,37 +231,48 @@ def _fill_dialog(dialog: "GimpUi.ProcedureDialog",
             (f for f in group_fields if f.metadata.get("group_master")), None
         )
 
-        # Collect leaf ids in this group, after splicing in any control-sub-frames.
         absorbed_by_controls: set[str] = set()
         leaf_ids: List[str] = []
+
         for f in group_fields:
             if master is not None and f.name == master.name:
                 continue
+
             if f.name in absorbed_by_controls:
                 continue
+
             controls = f.metadata.get("controls")
+
             if controls:
-                sub_id = f"{field_to_property(f.name)}-frame"
+                prop_id = field_to_property(f.name)
+
+                sub_box_id = f"{prop_id}-box"
+                sub_frame_id = f"{prop_id}-frame"
+
                 child_props = [field_to_property(c) for c in controls]
-                dialog.fill_frame(
-                    sub_id, field_to_property(f.name), False, child_props,
-                )
+
+                dialog.fill_box(sub_box_id, child_props)
+
+                dialog.fill_frame(sub_frame_id, prop_id, False, sub_box_id)
+
                 absorbed_by_controls.update(controls)
-                leaf_ids.append(sub_id)
+                leaf_ids.append(sub_frame_id)
+
             else:
                 leaf_ids.append(field_to_property(f.name))
 
         group_id = f"group-{field_to_property(group_name.replace(' ', '-'))}"
-        if master is not None:
-            # Frame's title is the master checkbox; sensitivity follows master.
-            dialog.fill_frame(
-                group_id, field_to_property(master.name), False, leaf_ids,
-            )
-        else:
-            # No master — use a plain box for visual grouping with no
-            # sensitivity logic.
-            box = dialog.fill_box(group_id, leaf_ids)
-            box.set_orientation(Gtk.Orientation.VERTICAL)
+        group_box_id = f"{group_id}-box"
+
+        dialog.fill_box(group_box_id, leaf_ids)
+
+        dialog.fill_frame(
+            group_id,
+            field_to_property(master.name) if master else None,
+            False,
+            group_box_id,
+        )
+
         top_level_ids.append(group_id)
 
     dialog.fill(top_level_ids)
@@ -250,15 +282,18 @@ def _fill_dialog(dialog: "GimpUi.ProcedureDialog",
 # Run function factory
 # ---------------------------------------------------------------------------
 
-def _make_run_fn(settings_class: Type,
-                 current_prefs: Any,
-                 settings_json_path: Path,
-                 on_settings_changed: Optional[Callable[[], None]],
-                 plug_in_binary: str) -> Callable:
+
+def _make_run_fn(
+    settings_class: Type,
+    current_prefs: Any,
+    settings_json_path: Path,
+    on_settings_changed: Optional[Callable[[], None]],
+    plug_in_binary: str,
+) -> Callable:
     """Returns a run function bound to the live in-memory settings object
     and the JSON path. The closure is what gets passed to Gimp.Procedure.new."""
 
-    def run(procedure, config, run_data):  # pylint: disable=unused-argument
+    def run(procedure, run_mode, image, drawables, config, *data):  # pylint: disable=unused-argument
         # Seed the dialog with live values
         for f in fields(settings_class):
             if f.name in _PRIVATE_FIELD_NAMES or f.metadata.get("group") is None:
@@ -266,11 +301,12 @@ def _make_run_fn(settings_class: Type,
             prop = field_to_property(f.name)
             config.set_property(prop, getattr(current_prefs, f.name))
         GimpUi.init(plug_in_binary)
-        dialog = GimpUi.ProcedureDialog.new(procedure, config,
-                                            "GimpPresence Settings")
+        dialog = GimpUi.ProcedureDialog.new(procedure, config, "GimpPresence Settings")
+        if dialog is None:
+            _gp_warn("[GimpPresence] failed to create settings dialog.")
+            return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, None)
         try:
             _fill_dialog(dialog, settings_class)
-
             if not dialog.run():
                 # User cancelled. GIMP discards the config changes; the
                 # next dialog open shows the prior values.
@@ -296,28 +332,31 @@ def _make_run_fn(settings_class: Type,
             try:
                 atomic_write_json(settings_json_path, new_values)
             except OSError as e:
-                Gimp.warning(f"[GimpPresence] Failed to write new settings to JSON: {e}")
+                _gp_warn(f"[GimpPresence] Failed to write new settings to JSON: {e}")
                 # Don't fail the dialog — in-memory state was already updated.
 
             if on_settings_changed is not None:
                 try:
                     on_settings_changed()
                 except Exception as e:  # noqa: BLE001
-                    Gimp.warning((
-                        "[GimpPresence] failed to interrupt RPC timer; "
-                        f"new settings may take time to take effect: {e}"
-                    ))
+                    _gp_warn(
+                        (
+                            "[GimpPresence] failed to interrupt RPC timer; "
+                            f"new settings may take time to take effect: {e}"
+                        )
+                    )
 
             return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+        except Exception as e:
+            _gp_warn(f"[GimpPresence] error constructing dialog: {e}")
         finally:
             dialog.destroy()
-
     return run
-
 
 # ---------------------------------------------------------------------------
 # Public factory
 # ---------------------------------------------------------------------------
+
 
 def build_settings_procedure(
     plug_in: "Gimp.PlugIn",
@@ -358,13 +397,11 @@ def build_settings_procedure(
         plug_in_binary=plug_in_binary,
     )
 
-    procedure = Gimp.Procedure.new(
-        plug_in,
-        proc_name,
-        Gimp.PDBProcType.TEMPORARY,
-        run_fn,
-        None,
+    procedure = Gimp.ImageProcedure.new(
+        plug_in, proc_name, Gimp.PDBProcType.TEMPORARY, run_fn
     )
+
+    procedure.set_image_types("*")
 
     procedure.set_menu_label("GimpPresence: Settings…")
     procedure.set_documentation(

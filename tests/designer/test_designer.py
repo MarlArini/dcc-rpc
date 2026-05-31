@@ -57,7 +57,7 @@ def test_package_name_from_path(sd):
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
     ctx = SPContext.capture()
-    assert ctx.package_name() == "Fabrics.sbs"
+    assert ctx.package_name() == "Package: Fabrics.sbs"
 
 
 def test_package_name_empty_path_calls_it_unsaved(sd):
@@ -78,25 +78,50 @@ def test_graph_name_from_annotation(sd):
     )
     sd.set_state(current_graph=g)
     ctx = SPContext.capture()
-    assert ctx.graph_name() == "Wool"
+    assert ctx.graph_name() == "Graph: Wool"
 
 
-def test_graph_name_missing_annotation_returns_none(sd):
+def test_graph_name_missing_annotation_returns_unsaved_string(sd):
+    """No 'identifier' annotation -> the graph is still open but unnamed; surface
+    it as 'Unsaved graph' rather than returning None (which would let the slot
+    fall back to a different display type and hide that there IS a graph)."""
     pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
     g = sd.make_graph(package=pkg, annotations={})
     sd.set_state(current_graph=g)
     ctx = SPContext.capture()
-    assert ctx.graph_name() is None
+    assert ctx.graph_name() == "Unsaved graph"
 
 
-def test_project_name_combines_package_and_graph(sd):
-    pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
-    g = sd.make_graph(
-        package=pkg, annotations={"identifier": sd.make_value_string("Wool")}
-    )
-    sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
-    assert ctx.project_name() == "Fabrics.sbs | Wool"
+def test_graph_name_replaces_underscores_when_pref_set(sd):
+    """SPSettings.replaceUnderscores=True swaps _ for space in the displayed
+    name. Pins the on-by-default behavior."""
+    SP_PLUGIN.prefs.replaceUnderscores = True
+    try:
+        pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
+        g = sd.make_graph(
+            package=pkg,
+            annotations={"identifier": sd.make_value_string("worn_wool_v2")},
+        )
+        sd.set_state(current_graph=g)
+        ctx = SPContext.capture()
+        assert ctx.graph_name() == "Graph: worn wool v2"
+    finally:
+        SP_PLUGIN.prefs.replaceUnderscores = True  # field default
+
+
+def test_graph_name_preserves_underscores_when_pref_unset(sd):
+    SP_PLUGIN.prefs.replaceUnderscores = False
+    try:
+        pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
+        g = sd.make_graph(
+            package=pkg,
+            annotations={"identifier": sd.make_value_string("worn_wool_v2")},
+        )
+        sd.set_state(current_graph=g)
+        ctx = SPContext.capture()
+        assert ctx.graph_name() == "Graph: worn_wool_v2"
+    finally:
+        SP_PLUGIN.prefs.replaceUnderscores = True
 
 
 # ---------------------------------------------------------------------------
@@ -416,33 +441,6 @@ def test_capture_returns_none_when_uimgr_is_none(monkeypatch):
     return None. We monkeypatch the plugin's uimgr to simulate that."""
     monkeypatch.setattr(SP_PLUGIN, "uimgr", None)
     assert SPContext.capture() is None
-
-def test_project_name_unsaved_package_with_graph_no_misleading_combo(sd):
-    """The unsaved-package + named-graph case must not contain the
-    'No package open' string."""
-    pkg = sd.make_package(file_path="")
-    g = sd.make_graph(
-        package=pkg,
-        annotations={"identifier": sd.make_value_string("Wool")},
-    )
-    sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
-    out = ctx.project_name()
-    assert out is not None
-    assert "No package open" not in out
-    # Graph name still surfaces so the user knows which sub-resource they're in.
-    assert "Wool" in out
-
-
-def test_project_name_returns_package_only_when_no_graph_name(sd):
-    """When package_name has a value but graph_name is None (no identifier
-    annotation), project_name returns just the package name."""
-    pkg = sd.make_package(file_path="/Project.sbs")
-    g = sd.make_graph(package=pkg, annotations={})  # no "identifier"
-    sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
-    assert ctx.project_name() == "Project.sbs"
-
 
 def test_node_name_returns_none_when_definition_is_none(sd):
     """A single-selected node whose getDefinition() returns None should make

@@ -23,8 +23,8 @@ What we cover:
     second call while the window is visible reuses it (no flicker / leak)
   - nk_open_settings creates a fresh window after the previous was hidden
   - field-to-widget construction over NKSettings, which adds
-    `displayRenderStats`/`displayFrames` to Details, `disableNodeQueries`
-    to General, and `disableUpscaledNodes` to Icons
+    `displayRenderStats`/`displayFrames` to Details and `disableNodeQueries`
+    to General
   - controller-driven sensitivity for group_master and controls
   - reset-to-defaults restores fields including _INITIAL_DEFAULTS overrides
 """
@@ -126,12 +126,26 @@ def test_nk_menu_install_wires_settings_command_to_nk_open_settings(
     assert settings_cmd.command is nm.nk_open_settings
 
 
-def test_nk_menu_install_initial_enabled_states(nk, menu_state_clean):
-    """NKMenu.__init__ calls self.start(), so on first install enable is
-    disabled and disable is enabled — mirroring 'presence currently on'."""
+def test_nk_menu_install_mirrors_loaded_general_enable_true(nk, menu_state_clean):
+    """NKMenu.__init__ mirrors prefs.generalEnable into the menu items rather
+    than forcing it on. With generalEnable=True at install time, the Enable
+    item is grayed out and the Disable item is live."""
+    nm.NK_PREFS.generalEnable = True
     fresh = nm.NKMenu(nm.NK_PREFS, nm.NK_WORKER)
     assert fresh.enable_item.enabled is False
     assert fresh.disable_item.enabled is True
+
+
+def test_nk_menu_install_mirrors_loaded_general_enable_false(nk, menu_state_clean):
+    """Regression: with generalEnable=False at install time (the user paused
+    presence in a previous session), the menu must reflect that, NOT
+    silently flip back to enabled."""
+    nm.NK_PREFS.generalEnable = False
+    fresh = nm.NKMenu(nm.NK_PREFS, nm.NK_WORKER)
+    assert fresh.enable_item.enabled is True
+    assert fresh.disable_item.enabled is False
+    # And the value was preserved, not clobbered by NKMenu.__init__.
+    assert nm.NK_PREFS.generalEnable is False
 
 
 # ---------------------------------------------------------------------------
@@ -252,19 +266,16 @@ def test_dialog_widget_types_match_nuke_field_types(dialog):
 
 
 def test_dialog_includes_nuke_specific_fields(dialog):
-    """The Nuke plugin adds four fields on top of SharedSettings; each should
-    appear in the right group with the right widget type."""
+    """The Nuke plugin adds three fields on top of SharedSettings; each
+    should appear in the right group with a checkbox widget. (The earlier
+    disableUpscaledNodes Icons-group field was dropped when the HD and
+    upscaled icon lists were merged into a single NK_ICONS catalog.)"""
     details_fields = {f.name for f in dialog._groups["Details"]}
     general_fields = {f.name for f in dialog._groups["General"]}
-    icons_fields = {f.name for f in dialog._groups["Icons"]}
     assert "displayRenderStats" in details_fields
     assert "displayFrames" in details_fields
     assert "disableNodeQueries" in general_fields
-    assert "disableUpscaledNodes" in icons_fields
-    for name in (
-        "displayRenderStats", "displayFrames",
-        "disableNodeQueries", "disableUpscaledNodes",
-    ):
+    for name in ("displayRenderStats", "displayFrames", "disableNodeQueries"):
         assert isinstance(dialog._gui_widgets[name], QtWidgets.QCheckBox)
 
 
@@ -350,17 +361,17 @@ def test_reset_restores_initial_defaults_combobox(dialog, prefs_snapshot, monkey
 
 
 def test_reset_restores_nuke_specific_field(dialog, prefs_snapshot, monkeypatch):
-    """disableUpscaledNodes is a Nuke-only field; reset should restore it
-    to its declared dataclass default (False)."""
-    dialog._gui_widgets["disableUpscaledNodes"].setChecked(True)
-    assert prefs_snapshot.disableUpscaledNodes is True
+    """displayFrames is a Nuke-only field with a True default; flip it off,
+    reset, expect True back."""
+    dialog._gui_widgets["displayFrames"].setChecked(False)
+    assert prefs_snapshot.displayFrames is False
     monkeypatch.setattr(
         QtWidgets.QMessageBox, "question",
         staticmethod(lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes),
     )
     dialog._on_reset_clicked()
-    assert prefs_snapshot.disableUpscaledNodes is False
-    assert dialog._gui_widgets["disableUpscaledNodes"].isChecked() is False
+    assert prefs_snapshot.displayFrames is True
+    assert dialog._gui_widgets["displayFrames"].isChecked() is True
 
 
 def test_reset_no_op_when_user_cancels(dialog, prefs_snapshot, monkeypatch):
