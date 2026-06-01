@@ -467,19 +467,16 @@ def mp_update_small_icon(ctx: MPContext):
     if MP_PREFS.displaySmallIcon:
         if MP_PREFS.displayEngine and MP_SESSION.is_rendering:
             # No icons for Maya Software / Maya Hardware
-            engines = ["Arnold", "Redshift", "RenderMan", "V-Ray"]
+            engines = ["Arnold", "Redshift", "RenderMan", "V-Ray", "Octane"]
             current_engine = ctx.get_render_engine_str()
             if current_engine in engines:
                 icon_file_name = current_engine.lower().replace("-", "")
-            else:
                 icon_text = current_engine
             # GPU
             if MP_PREFS.displayGPU:
                 gpustr = ctx.get_gpu_str()
                 if gpustr and icon_text:
                     icon_text += " | " + gpustr
-                elif gpustr:
-                    icon_text = gpustr
         else:
             try:
                 # "Modeling - Expert", "Pose Sculpting", etc.
@@ -545,7 +542,6 @@ MP_DISPLAY_TYPES = {
     "active": lambda ctx: ctx.get_active_object(),
     "context": lambda ctx: ctx.get_user_context(),
 }
-MP_DISPLAY_CYCLE = list(MP_DISPLAY_TYPES.keys())
 
 
 def mp_update_presence_details(ctx: MPContext):
@@ -571,7 +567,7 @@ def mp_update_presence_details(ctx: MPContext):
                 else ""
             )
             + (
-                f"Frame {frame_range[0]} of {frame_range[1]}"
+                f"Frame {MP_SESSION.rendered_frames} of {frame_range[1]}"
                 if MP_PREFS.displayFrames and frame_range[1]
                 else ""
             )

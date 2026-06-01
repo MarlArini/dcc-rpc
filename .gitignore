@@ -10,6 +10,5 @@ __pycache__/
 obj
 bin
 houdini_presence
-c4d_presence
 .coverage
 docs/

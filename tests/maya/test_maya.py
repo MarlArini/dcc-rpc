@@ -860,12 +860,15 @@ def test_get_render_fps_runtimeerror_returns_24(cmds):
 
 
 def test_update_presence_details_rendering_branch(cmds, maya_globals_clean):
-    """When rendering, details_text incorporates resolution + frame range + fps."""
+    """When rendering, details_text incorporates resolution + rendered-frame
+    counter + fps. The frame number comes from MP_SESSION.rendered_frames
+    (driven by render callbacks) — not from the cursor position."""
     MP_PREFS.enableDetails = True
     MP_PREFS.displayRenderStats = True
     MP_PREFS.displayFrames = True
     MP_PREFS.displayFileName = True
     MP_SESSION.is_rendering = True
+    MP_SESSION.rendered_frames = 17
     cmds.set_state(
         scene_name="/p/maya/scene01.mb",
         current_time=15.0, min_time=10.0, max_time=110.0,
@@ -882,7 +885,7 @@ def test_update_presence_details_rendering_branch(cmds, maya_globals_clean):
     assert "Rendering" in out
     assert "scene01" in out
     assert "1920x1080" in out
-    assert "Frame 6 of 101" in out
+    assert "Frame 17 of 101" in out
     assert "24fps" in out
 
 
@@ -930,9 +933,10 @@ def test_update_presence_state_disabled_clears(cmds, maya_globals_clean):
 # update_small_icon: remaining branches
 # ---------------------------------------------------------------------------
 
-def test_update_small_icon_engine_not_in_engines_uses_icon_text(cmds, maya_globals_clean):
-    """A render-time engine that isn't one of Arnold/Redshift/RenderMan/V-Ray
-    leaves icon_file_name as None but sets icon_text to the engine name."""
+def test_update_small_icon_engine_not_in_engines_clears_text(cmds, maya_globals_clean):
+    """A render-time engine that isn't in the mapped set (Arnold/Redshift/
+    RenderMan/V-Ray/Octane) yields no icon AND no text — the rule is that
+    icon_text never appears without an icon to go with it."""
     MP_PREFS.displaySmallIcon = True
     MP_PREFS.displayEngine = True
     MP_PREFS.displayGPU = False
@@ -941,14 +945,13 @@ def test_update_small_icon_engine_not_in_engines_uses_icon_text(cmds, maya_globa
                           "defaultRenderGlobals.currentRenderer": "mayaSoftware"})
     ctx = MPContext.capture()
     mp_update_small_icon(ctx)
-    # No icon file for Maya Software, but icon_text reflects the engine.
     assert MP_UPDATE_DETAILS.small_icon is None
-    assert MP_UPDATE_DETAILS.small_icon_text == "Maya Software"
+    assert MP_UPDATE_DETAILS.small_icon_text == ""
 
 
-def test_update_small_icon_with_gpu_appended(cmds, maya_globals_clean):
-    """When displayGPU is on AND we already have icon_text from a non-mapped
-    engine, the GPU string is concatenated with ' | '."""
+def test_update_small_icon_gpu_not_shown_without_engine_icon(cmds, maya_globals_clean):
+    """displayGPU only piggybacks onto existing icon_text — for an unmapped
+    engine there's no icon and no text, so the GPU string is suppressed too."""
     MP_PREFS.displaySmallIcon = True
     MP_PREFS.displayEngine = True
     MP_PREFS.displayGPU = True
@@ -960,14 +963,13 @@ def test_update_small_icon_with_gpu_appended(cmds, maya_globals_clean):
     )
     ctx = MPContext.capture()
     mp_update_small_icon(ctx)
-    assert "Maya Software" in MP_UPDATE_DETAILS.small_icon_text
-    assert "|" in MP_UPDATE_DETAILS.small_icon_text
-    assert "RTX 4090" in MP_UPDATE_DETAILS.small_icon_text
+    assert MP_UPDATE_DETAILS.small_icon is None
+    assert MP_UPDATE_DETAILS.small_icon_text == ""
 
 
-def test_update_small_icon_with_gpu_only_when_engine_mapped(cmds, maya_globals_clean):
-    """When the engine IS in the mapped set (e.g. Arnold), icon_text was
-    empty — displayGPU then puts the GPU name in by itself."""
+def test_update_small_icon_mapped_engine_appends_gpu(cmds, maya_globals_clean):
+    """Mapped engine -> icon_file_name AND icon_text set to engine name;
+    displayGPU then appends ' | <gpu>'."""
     MP_PREFS.displaySmallIcon = True
     MP_PREFS.displayEngine = True
     MP_PREFS.displayGPU = True
@@ -980,8 +982,24 @@ def test_update_small_icon_with_gpu_only_when_engine_mapped(cmds, maya_globals_c
     ctx = MPContext.capture()
     mp_update_small_icon(ctx)
     assert MP_UPDATE_DETAILS.small_icon == "arnold"
+    assert MP_UPDATE_DETAILS.small_icon_text.startswith("Arnold")
+    assert "|" in MP_UPDATE_DETAILS.small_icon_text
     assert "RTX 5090" in MP_UPDATE_DETAILS.small_icon_text
-    assert "|" not in MP_UPDATE_DETAILS.small_icon_text  # no engine prefix to join
+
+
+def test_update_small_icon_octane_now_recognized(cmds, maya_globals_clean):
+    """Regression: Octane was added to the mapped engines set so it gets the
+    same icon-plus-text treatment as Arnold/Redshift/RenderMan/V-Ray."""
+    MP_PREFS.displaySmallIcon = True
+    MP_PREFS.displayEngine = True
+    MP_PREFS.displayGPU = False
+    MP_SESSION.is_rendering = True
+    cmds.set_state(attrs={**cmds.get_state().attrs,
+                          "defaultRenderGlobals.currentRenderer": "Octane"})
+    ctx = MPContext.capture()
+    mp_update_small_icon(ctx)
+    assert MP_UPDATE_DETAILS.small_icon == "octane"
+    assert MP_UPDATE_DETAILS.small_icon_text == "Octane"
 
 
 def test_update_small_icon_workspace_layout_exception_falls_through(cmds, maya_globals_clean):

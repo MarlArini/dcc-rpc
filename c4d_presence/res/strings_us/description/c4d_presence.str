@@ -1,0 +1,57 @@
+STRINGTABLE c4d_presence {
+    c4d_presence                    "c4d_presence";
+
+    C4DPRESENCE_GENERAL             "General";
+    C4DPRESENCE_GENERALENABLE       "Enable RPC Updates";
+    C4DPRESENCE_GENERALUPDATE       "RPC Update Interval (s)";
+    C4DPRESENCE_ENABLETIME          "Show elapsed time";
+    C4DPRESENCE_RESETTIMER          "Reset timer when a new document is opened";
+
+    C4DPRESENCE_ICONS               "Icons";
+    C4DPRESENCE_SHOWVERSION         "Display application version on large icon hover";
+    C4DPRESENCE_SMALLICONS          "Display a small icon for specific contexts";
+
+    C4DPRESENCE_DETAILS             "Details";
+    C4DPRESENCE_DFIELD              "Enable details field";
+    C4DPRESENCE_DTYPE               "Detail type to display";
+    C4DPRESENCE_DCUSTOM             "Custom details text";
+    C4DPRESENCE_DCYCLE              "Cycle displayed details";
+
+    C4DPRESENCE_STATE               "State";
+    C4DPRESENCE_SFIELD              "Enable state field";
+    C4DPRESENCE_STYPE               "State type to display";
+    C4DPRESENCE_SCUSTOM             "Custom state text";
+    C4DPRESENCE_SCYCLE              "Cycle displayed state";
+
+    C4DPRESENCE_RENDERING           "Rendering";
+    C4DPRESENCE_RENDERICON          "Display a small icon for in-use third-party renderers";
+    C4DPRESENCE_GPUSTR              "Display GPU name in small icon text when rendering";
+    C4DPRESENCE_RENDERSTATS         "Override details field with render info when rendering";
+    C4DPRESENCE_RENDERFILE          "Display document name when rendering";
+    C4DPRESENCE_RENDERFRAME         "Display frames rendered when rendering";
+
+    C4DPRESENCE_BUTTONS             "Buttons";
+
+    C4DPRESENCE_B1                  "Button 1";
+    C4DPRESENCE_B1ON                "Enable button 1";
+    C4DPRESENCE_B1LABEL             "Button 1 label";
+    C4DPRESENCE_B1URL               "Button 1 url";
+
+    C4DPRESENCE_B2                  "Button 2";
+    C4DPRESENCE_B2ON                "Enable button 2";
+    C4DPRESENCE_B2LABEL             "Button 2 label";
+    C4DPRESENCE_B2URL               "Button 2 url";
+
+    C4DPRESENCE_INFODOC             "Active document";
+    C4DPRESENCE_INFOOBJ             "Active object";
+    C4DPRESENCE_INFOPLY             "Poly object count";
+    C4DPRESENCE_INFOGEN             "MoGraph generator count";
+    C4DPRESENCE_INFOEFF             "MoGraph effector count";
+    C4DPRESENCE_INFOLIG             "Light count";
+    C4DPRESENCE_INFOCAM             "Camera count";
+    C4DPRESENCE_INFOMAT             "Material count";
+    C4DPRESENCE_INFOTEX             "Texture count";
+    C4DPRESENCE_INFOFRM             "Current frame";
+
+    C4DPRESENCE_RESETALL            "Reset all settings to defaults";
+}

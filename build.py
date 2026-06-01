@@ -297,6 +297,32 @@ def _bundle_krita(pypresence_src: Path) -> None:
     print("[build] krita_presence/")
 
 
+def _bundle_c4d(pypresence_src: Path) -> None:
+    """Produces:
+        dist/c4d_presence/                   (drop into a C4D plugins folder)
+          c4d_presence.pyp
+          res/
+            c4d_symbols.h
+            description/
+            strings_us/
+          common.py
+          pypresence/
+
+    C4D loads .pyp files directly; the bootstrap snippet at the top of
+    c4d_presence.pyp inserts its own directory on sys.path, so absolute
+    imports of the sibling common and pypresence modules resolve without
+    any rewriting (same contract as Maya and Nuke).
+    """
+    src = REPO / "c4d_presence"
+    if not (src / "c4d_presence.pyp").exists():
+        print("[build] skip c4d_presence: c4d_presence.pyp not found")
+        return
+    dst = DIST / "c4d_presence"
+    shutil.copytree(src, dst, ignore=IGNORE)
+    _drop_runtime(dst, pypresence_src)
+    print("[build] c4d_presence/")
+
+
 def _bundle_gimp(pypresence_src: Path) -> None:
     """Produces:
         dist/gimp_presence/                  (drop into GIMP plug-ins/)
@@ -345,6 +371,7 @@ def build() -> None:
     _bundle_painter(pypresence_src)
     _bundle_krita(pypresence_src)
     _bundle_gimp(pypresence_src)
+    _bundle_c4d(pypresence_src)
 
     print(f"[build] done -> {DIST}")
 
