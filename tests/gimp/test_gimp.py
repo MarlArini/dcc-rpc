@@ -37,7 +37,7 @@ from gimp_presence import (
     gp_update_small_icon, gp_update_large_icon, gp_update_presence,
     gp_register_temp_procedures, gp_unregister_temp_procedures,
     gp_start_timer, gp_stop_timer, gp_tick, gp_quit_loop,
-    _GP_TEMP_PROCEDURES, _GP_DOCNAME_WAS_DOCCOUNT, _GP_TEMP_PROCEDURES_REGISTERED
+    _GP_TEMP_PROCEDURES
 )
 from settings_dialog import SETTINGS_PROC_NAME
 from gi.repository import GLib
@@ -52,11 +52,8 @@ from gi.repository import GLib
 @pytest.fixture(autouse=True)
 def _reset_module_state():
     """Reset every piece of module-level state the tests in this file touch."""
-    snap_pinned = gp._GP_PINNED_IMAGE
     snap_timer = gp._GP_TIMER_ID
     snap_docs_open = set(gp.GP_DOCS_OPEN)
-    snap_doccount_flag = gp._GP_DOCNAME_WAS_DOCCOUNT
-    snap_temp_registered = gp._GP_TEMP_PROCEDURES_REGISTERED
     snap_connected = GP_SESSION.connected
     snap_prefs = {f.name: getattr(GP_PREFS, f.name)
                   for f in GPSettings.__dataclass_fields__.values()}
@@ -66,12 +63,9 @@ def _reset_module_state():
         GP_DETAILS.state_text, GP_DETAILS.details_text,
     )
     yield
-    gp._GP_PINNED_IMAGE = snap_pinned
     gp._GP_TIMER_ID = snap_timer
     gp.GP_DOCS_OPEN.clear()
     gp.GP_DOCS_OPEN.update(snap_docs_open)
-    gp._GP_DOCNAME_WAS_DOCCOUNT = snap_doccount_flag
-    gp._GP_TEMP_PROCEDURES_REGISTERED = snap_temp_registered
     GP_SESSION.connected = snap_connected
     for name, value in snap_prefs.items():
         object.__setattr__(GP_PREFS, name, value)
@@ -228,7 +222,7 @@ class TestGpGetActiveImage:
         a = gimp.make_image(id=1, name="a")
         b = gimp.make_image(id=2, name="b")
         gimp.set_state(images=[a, b])
-        gp._GP_PINNED_IMAGE = b.get_id()
+        GP_SESSION.pinned_image = b.get_id()
         assert _gp_get_active_image() is b
 
     def test_pinned_image_unpins_when_closed(self, gimp):
@@ -237,11 +231,11 @@ class TestGpGetActiveImage:
         a = gimp.make_image(id=1, name="a")
         b = gimp.make_image(id=2, name="b")
         gimp.set_state(images=[a])  # only a is still open
-        gp._GP_PINNED_IMAGE = b.get_id()
+        GP_SESSION.pinned_image = b.get_id()
         # 'a' is the only image, so single-image branch returns it.
         assert _gp_get_active_image() is a
         # Pin state was cleared.
-        assert gp._GP_PINNED_IMAGE is None
+        assert GP_SESSION.pinned_image is None
 
     def test_multi_image_with_no_window_query_uses_fallback_none(self, gimp):
         a = gimp.make_image(id=1, name="a")
@@ -321,11 +315,11 @@ class TestGPContext:
         ctx = GPContext(images=[img], active_image=img)
         assert ctx.active_image_name() == "sketch.xcf"
         # Subsequent num_images should NOT be suppressed (flag is False).
-        assert gp._GP_DOCNAME_WAS_DOCCOUNT is False
+        assert GP_SESSION.docname_was_doccount is False
 
     def test_active_image_name_pinned_shows_emoji(self, gimp):
         img = gimp.make_image(name="primary.xcf")
-        gp._GP_PINNED_IMAGE = img
+        GP_SESSION.pinned_image = img
         ctx = GPContext(images=[img], active_image=img)
         assert ctx.active_image_name() == "📌 primary.xcf"
 
@@ -338,7 +332,7 @@ class TestGPContext:
         ctx = GPContext(images=[a, b], active_image=None)
         result = ctx.active_image_name()
         assert "2 images" in result
-        assert gp._GP_DOCNAME_WAS_DOCCOUNT is True
+        assert GP_SESSION.docname_was_doccount is True
 
     def test_active_image_name_no_active_no_alternates(self, gimp):
         GP_PREFS.useAlternates = False
@@ -354,10 +348,10 @@ class TestGPContext:
         suppressed by the stale flag. (The active_image_name() == 'No images
         open' invariant on its own is covered by
         test_num_images_zero_returns_no_images_open above.)"""
-        gp._GP_DOCNAME_WAS_DOCCOUNT = True  # left over from a previous tick
+        GP_SESSION.docname_was_doccount = True  # left over from a previous tick
         ctx = GPContext(images=[], active_image=None)
         ctx.active_image_name()  # trigger the branch we expect to reset the flag
-        assert gp._GP_DOCNAME_WAS_DOCCOUNT is False
+        assert GP_SESSION.docname_was_doccount is False
         assert ctx.num_images() == "No images open"
 
     # --- num_images ---
@@ -375,7 +369,7 @@ class TestGPContext:
     def test_num_images_suppressed_when_docname_already_showed_count(self):
         """If active_image_name already returned the doc count, num_images
         returns None so a cycle won't show it twice."""
-        gp._GP_DOCNAME_WAS_DOCCOUNT = True
+        GP_SESSION.docname_was_doccount = True
         ctx = GPContext(images=[], active_image=None)
         assert ctx.num_images() is None
 
@@ -603,15 +597,14 @@ class TestPinToggle:
         img = gimp.make_image(id=7, name="primary")
         proc = self._make_proc(gimp, "gimppresence-pin-image")
         gp_pin_image(proc, None, img, None, None, None)
-        # _GP_PINNED_IMAGE now stores the image id, not the Image object.
-        assert gp._GP_PINNED_IMAGE == 7
+        assert GP_SESSION.pinned_image == 7
 
     def test_unpin_image_clears_global(self, gimp):
         img = gimp.make_image(id=7)
-        gp._GP_PINNED_IMAGE = img.get_id()
+        GP_SESSION.pinned_image = img.get_id()
         proc = self._make_proc(gimp, "gimppresence-unpin-image")
         gp_unpin_image(proc, None, img, None, None, None)
-        assert gp._GP_PINNED_IMAGE is None
+        assert GP_SESSION.pinned_image is None
 
     def test_toggle_rpc_flips_general_enable(self, gimp):
         proc = self._make_proc(gimp, "gimppresence-toggle-rpc")
@@ -773,10 +766,10 @@ class TestTimer:
         assert GLib._last_scheduled_interval() == 12000  # ms
 
     def test_start_timer_clamps_to_minimum_1s(self):
-        """generalUpdate=0 should still produce at least 1000ms interval."""
+        """generalUpdate=0 should still produce at least 10000ms interval."""
         GP_PREFS.generalUpdate = 0
         gp_start_timer()
-        assert GLib._last_scheduled_interval() == 1000
+        assert GLib._last_scheduled_interval() == 10000
 
     def test_stop_timer_clears_id(self):
         gp_start_timer()
@@ -826,7 +819,7 @@ class TestTempProcedureRegistration:
         registered = set(gimp.get_state().temp_procedures.keys())
         expected = set(_GP_TEMP_PROCEDURES.keys()) | {SETTINGS_PROC_NAME}
         assert registered == expected
-        assert gp._GP_TEMP_PROCEDURES_REGISTERED is True
+        assert GP_SESSION.temp_procedures_registered is True
 
     def test_register_all_temp_procs_set_image_types_wildcard(self, gimp):
         """Regression for the GIMP error 'attempted to install <Image>
@@ -857,12 +850,12 @@ class TestTempProcedureRegistration:
         assert len(gimp.get_state().temp_procedures) >= 4
         gp_unregister_temp_procedures(plugin)
         assert len(gimp.get_state().temp_procedures) == 0
-        assert gp._GP_TEMP_PROCEDURES_REGISTERED is False
+        assert GP_SESSION.temp_procedures_registered is False
 
     def test_unregister_skips_when_not_registered(self, gimp):
         """Calling unregister before register should not raise."""
         plugin = gimp.PlugIn()
-        gp._GP_TEMP_PROCEDURES_REGISTERED = False
+        GP_SESSION.temp_procedures_registered = False
         gp_unregister_temp_procedures(plugin)  # no error
         assert gimp.get_state().temp_procedures == {}
 

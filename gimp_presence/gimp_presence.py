@@ -50,7 +50,6 @@ if _HERE not in sys.path:
 
 _GP_PATTERN = re.compile(r"\[(\w+)\]")
 _GP_PREFS_PATH = Path(Gimp.directory()) / "plug-in-settings" / "gimp_presence.json"
-_GP_TEMP_PROCEDURES_REGISTERED: bool = False
 
 _GP_MAIN_LOOP: GLib.MainLoop | None = None
 _GP_TIMER_ID: int | None = None
@@ -61,6 +60,7 @@ _GP_TIMER_ID: int | None = None
 class GPSession(SessionInfo):
     docname_was_doccount: bool = False
     pinned_image: Gimp.Image | None = None
+    temp_procedures_registered: bool = False
 
 
 GP_SESSION = GPSession()
@@ -554,7 +554,6 @@ _GP_TEMP_PROCEDURES = {
 
 
 def gp_register_temp_procedures(plugin: Gimp.PlugIn):
-    global _GP_TEMP_PROCEDURES_REGISTERED
     for proc_name, proc_details in _GP_TEMP_PROCEDURES.items():
         procedure = Gimp.ImageProcedure.new(
             plugin, proc_name, Gimp.PDBProcType.TEMPORARY, proc_details[0]
@@ -572,17 +571,16 @@ def gp_register_temp_procedures(plugin: Gimp.PlugIn):
         on_settings_changed=gp_start_timer,
     )
     plugin.add_temp_procedure(settings_proc)
-    _GP_TEMP_PROCEDURES_REGISTERED = True
+    GP_SESSION.temp_procedures_registered = True
 
 
 def gp_unregister_temp_procedures(plugin: Gimp.PlugIn):
-    global _GP_TEMP_PROCEDURES_REGISTERED
-    if not _GP_TEMP_PROCEDURES_REGISTERED:
+    if not GP_SESSION.temp_procedures_registered:
         return
     for proc_name in _GP_TEMP_PROCEDURES:
         plugin.remove_temp_procedure(proc_name)
     plugin.remove_temp_procedure(SETTINGS_PROC_NAME)
-    _GP_TEMP_PROCEDURES_REGISTERED = False
+    GP_SESSION.temp_procedures_registered = False
 
 
 def gp_run(procedure, config, data):  # pylint: disable=unused-argument

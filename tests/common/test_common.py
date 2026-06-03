@@ -7,7 +7,6 @@ any fakes. Heavy use of pytest.mark.parametrize to keep the file readable.
 """
 from __future__ import annotations
 from types import SimpleNamespace
-from typing import Any
 import pytest
 
 from common import (
@@ -21,11 +20,10 @@ from common import (
     update_buttons,
     update_slot,
     advance_cycle,
-    on_render_start,
     on_render_end,
     on_frame_render_end,
 )
-from common.common import pick_fixed, pick_cycling  # not re-exported via __init__
+from common.rpc_util import pick_fixed, pick_cycling  # not re-exported via __init__
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +401,7 @@ def test_on_frame_render_end_increments():
 # RPC: connect_rpc, push_rpc_update, rpc_update, force_clear_on_exit
 # ---------------------------------------------------------------------------
 
-from common.common import (  # noqa: E402
+from common.rpc_util import (  # noqa: E402
     connect_rpc, push_rpc_update, rpc_update, force_clear_on_exit,
 )
 from pypresence import exceptions  # noqa: E402
@@ -767,7 +765,7 @@ def test_jsonsharedsettings_reset_restores_defaults(tmp_path):
 # we test against a minimal concrete subclass.)
 # ---------------------------------------------------------------------------
 
-from common.common import RPCBasePlugin, JSONSharedSettings  # noqa: E402
+from common.qt_common import RPCBasePlugin, JSONSharedSettings  # noqa: E402
 from common import SharedSettings as _SharedSettingsForRPCBase  # noqa: E402
 
 
