@@ -28,7 +28,7 @@ import csv
 import math
 import re
 from pathlib import Path
-from typing import Iterable, NamedTuple
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent

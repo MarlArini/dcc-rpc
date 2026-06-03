@@ -405,7 +405,7 @@ def test_update_large_icon_with_version(sd, designer_plugin_clean):
     ctx = SPContext.capture()
     designer_plugin_clean.update_large_icon(ctx)
     assert "16.0.1" in designer_plugin_clean.details.large_icon_text
-    assert "Adobe Substance Designer" in designer_plugin_clean.details.large_icon_text
+    assert "Adobe Substance 3D Designer" in designer_plugin_clean.details.large_icon_text
 
 
 def test_update_large_icon_without_version(sd, designer_plugin_clean):
@@ -415,7 +415,7 @@ def test_update_large_icon_without_version(sd, designer_plugin_clean):
     sd.set_state(current_graph=g)
     ctx = SPContext.capture()
     designer_plugin_clean.update_large_icon(ctx)
-    assert designer_plugin_clean.details.large_icon_text == "Adobe Substance Designer"
+    assert designer_plugin_clean.details.large_icon_text == "Adobe Substance 3D Designer"
 
 
 def test_on_file_open_resets_timer_when_pref_set(sd, designer_plugin_clean):

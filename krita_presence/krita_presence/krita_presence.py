@@ -15,10 +15,14 @@ import PyQt5.QtGui as qg  # pyright: ignore[reportMissingImports]
 import PyQt5.QtWidgets as qw  # pyright: ignore[reportMissingImports]
 import PyQt5.QtCore as qc  # pyright: ignore[reportMissingImports]
 import krita as kr  # pyright: ignore[reportMissingImports]
-
 # pylint: enable=import-error
-from common import SharedSettings, RPCBasePlugin, QtSettingsGUIMenu, ColoredIconSettings
-from common import plural as kp_plural
+
+from common import (
+    SharedSettings,
+    RPCBasePlugin,
+    ColoredIconSettings,
+    plural as kp_plural,
+)
 from colors import find_closest as kp_find_closest_color
 
 # Identifier for the one Krita tool we have per-color icon variants for.
@@ -465,17 +469,11 @@ class KPExtension(kr.Extension):
         if window is None:
             return
         qwindow = window.qwindow()
-        # pylint: disable=attribute-defined-outside-init
-        self._plugin.settings_window = QtSettingsGUIMenu(
-            prefs=self._plugin.prefs,
-            refresh_func=self._plugin.push_rpc_update,
-            app_name="Krita",
-            parent=qwindow,
-        )
-        # pylint: enable=attribute-defined-outside-init
-        self._plugin.settings_window.show()
-        self._plugin.settings_window.raise_()
-        self._plugin.settings_window.activateWindow()
+        self._plugin.make_qt_window("Krita", qwindow)
+        if self._plugin.settings_window:
+            self._plugin.settings_window.show()
+            self._plugin.settings_window.raise_()
+            self._plugin.settings_window.activateWindow()
 
     def createActions(self, window):  # pylint: disable=invalid-name
         if window is None:

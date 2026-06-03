@@ -31,7 +31,7 @@ def _srgb_decode(c: float) -> float:
     return ((c + 0.055) / 1.055) ** 2.4
 
 def _linear_srgb_to_oklab(r: float, g: float, b: float) -> Tuple[float, float, float]:
-    l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+    l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b  # noqa: E741 (ambiguous name 'l')
     m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
     s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
     l_ = l ** (1.0 / 3.0) if l >= 0 else -((-l) ** (1.0 / 3.0))

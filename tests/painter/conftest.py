@@ -42,3 +42,19 @@ def sp():
     """Direct access to the fake substance_painter module."""
     import substance_painter
     return substance_painter
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _cleanup_painter_settings_json():
+    """Importing painter_presence triggers SP_PLUGIN = SPPlugin(), whose
+    JSONSharedSettings.setup_persistence writes painter_presence_settings.json
+    into the plug-in directory. That's the right behavior at runtime but
+    leaves a tracked-looking file in the source tree after the test session.
+    Remove it once when the suite ends."""
+    yield
+    settings_file = _PAINTER_SOURCE / "painter_presence_settings.json"
+    if settings_file.exists():
+        try:
+            settings_file.unlink()
+        except OSError:
+            pass

@@ -19,7 +19,7 @@ from typing import ClassVar, List, Tuple, Dict, Callable, Set, Any
 
 from pypresence.presence import Presence
 
-# pylint:disable=wrong-import-position,wrong-import-order, import-error
+# pylint: disable=wrong-import-position, wrong-import-order, import-error
 import gi  # pyright: ignore[reportMissingImports]
 
 gi.require_version("Gimp", "3.0")
@@ -31,8 +31,8 @@ from common import (  # noqa: E402
     SharedSettings,
     SessionInfo,
     ColoredIconSettings,
-    plural as gp_plural,
     RPCUpdateDetails,
+    plural as gp_plural,
     push_rpc_update,
     connect_rpc,
     update_slot,
@@ -49,40 +49,46 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 _GP_PATTERN = re.compile(r"\[(\w+)\]")
-_GP_PINNED_IMAGE: int | None = None
 _GP_PREFS_PATH = Path(Gimp.directory()) / "plug-in-settings" / "gimp_presence.json"
-_GP_DOCNAME_WAS_DOCCOUNT: bool = False
 _GP_TEMP_PROCEDURES_REGISTERED: bool = False
 
 _GP_MAIN_LOOP: GLib.MainLoop | None = None
 _GP_TIMER_ID: int | None = None
 
-#pylint: disable=unused-argument
+# pylint: disable=unused-argument
+
+
+class GPSession(SessionInfo):
+    docname_was_doccount: bool = False
+    pinned_image: Gimp.Image | None = None
+
+
+GP_SESSION = GPSession()
+
 
 def gp_pin_image(procedure, run_mode, image, drawables, config, *data):
-    global _GP_PINNED_IMAGE
-    _GP_PINNED_IMAGE = image.get_id()
-    return procedure.new_return_values(
-        Gimp.PDBStatusType.SUCCESS,
-        None
-    )
+    """'Pin' the currently-open image, using that image for all context queries
+    until it is closed or unpinned. Registered as a temporary procedure method."""
+    GP_SESSION.pinned_image = image.get_id()
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+
 
 def gp_unpin_image(procedure, run_mode, image, drawables, config, *data):
-    global _GP_PINNED_IMAGE
-    _GP_PINNED_IMAGE = None
-    return procedure.new_return_values(
-        Gimp.PDBStatusType.SUCCESS,
-        None
-    )
+    """'Unpin' a previously pinned image. Safe to call if no image is pinned.
+    Registered as a temporary procedure method."""
+    GP_SESSION.pinned_image = None
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+
 
 def gp_toggle_rpc(procedure, run_mode, image, drawables, config, *data):
+    """Toggle the generalEnable status. Registered as a temporary procedure
+    method."""
     GP_PREFS.generalEnable = not GP_PREFS.generalEnable
-    return procedure.new_return_values(
-        Gimp.PDBStatusType.SUCCESS,
-        None
-    )
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
-#pylint: enable=unused-argument
+
+# pylint: enable=unused-argument
+
 
 ############
 # Settings #
@@ -114,7 +120,7 @@ class GPSettings(SharedSettings, ColoredIconSettings):
         default=platform.system() == "Windows",
         metadata={
             "group": "General",
-            "label": "Attempt to find the active image name via GIMP Window title",
+            "label": "Attempt to find the active image name via GIMP window title",
         },
     )
     imageFallbackMode: str = field(
@@ -152,10 +158,12 @@ def gp_load_settings():
 
 
 GP_PREFS = GPSettings()
-GP_SESSION = SessionInfo()
 
 
 def _gp_platform_query_window() -> str | None:
+    """Try to find the active image name from the window title of the
+    GIMP application. Currently only works on Windows; safe to call on
+    other platforms but will just return None."""
     if not GP_PREFS.queryWindow:
         return None
     p = platform.system()
@@ -177,7 +185,7 @@ def _gp_platform_query_window() -> str | None:
             if doc_name is None:
                 return None
             return doc_name.group(1)
-        except:  # noqa: E722 | pylint: disable=bare-except
+        except Exception:
             return None
     else:
         # New Linux (e.g., Ubuntu 26.04) uses Wayland, which does not expose window titles
@@ -186,6 +194,8 @@ def _gp_platform_query_window() -> str | None:
 
 
 def _gp_match_title(title: str, images: List[Gimp.Image]) -> Gimp.Image | None:
+    """Given a title extracted from the window title, try to find an image with
+    a matching title in the list of open images."""
     for image in images:
         image_name = image.get_name()
         image_name_extracted = _GP_PATTERN.match(image_name)
@@ -197,13 +207,16 @@ def _gp_match_title(title: str, images: List[Gimp.Image]) -> Gimp.Image | None:
 
 
 def _gp_get_active_image() -> Gimp.Image | None:
-    global _GP_PINNED_IMAGE
-    if _GP_PINNED_IMAGE is not None:
-        if Gimp.Image.id_is_valid(_GP_PINNED_IMAGE):
+    """Try to find the active image. First checks if an image is pinned, then
+    whether no images are open or only one is open, then tries to query the
+    application window title, then finally goes to an image fallback mode."""
+    pinned_image = GP_SESSION.pinned_image
+    if pinned_image is not None:
+        if Gimp.Image.id_is_valid(pinned_image):
             img_map = {i.get_id(): i for i in Gimp.get_images()}
-            return img_map[_GP_PINNED_IMAGE]
+            return img_map.get(pinned_image, None)
         else:
-            _GP_PINNED_IMAGE = None
+            GP_SESSION.pinned_image = None
     images = Gimp.get_images()
     if not images:
         return None
@@ -222,6 +235,8 @@ def _gp_get_active_image() -> Gimp.Image | None:
 
 
 def _gp_get_enum_name(enumerated_value) -> str:
+    """Helper to convert a value from an enum class into the string
+    label associated with it"""
     m = type(enumerated_value)._member_map_  # pylint: disable=protected-access
     m_inv = {v: k for k, v in m.items()}
     return m_inv[enumerated_value]
@@ -245,22 +260,21 @@ class GPContext:
         """Try to fetch the active image name.
         Alternate: return the number of images currently open and set a flag
         to return None on num_images calls until a fetch succeeds."""
-        global _GP_DOCNAME_WAS_DOCCOUNT
         # Images open but unable to find active image
         if self.images and self.active_image is None:
             if GP_PREFS.useAlternates:
                 num_docs = self.num_images()
-                _GP_DOCNAME_WAS_DOCCOUNT = True
+                GP_SESSION.docname_was_doccount = True
                 return num_docs
             else:
                 return None
-        _GP_DOCNAME_WAS_DOCCOUNT = False
+        GP_SESSION.docname_was_doccount = False
         # No images open
         if not self.images:
             return "No images open"
         # Found image
         elif self.active_image is not None:
-            if _GP_PINNED_IMAGE is not None:
+            if GP_SESSION.pinned_image is not None:
                 return f"📌 {self.active_image.get_name()}"
             else:
                 return self.active_image.get_name()
@@ -268,7 +282,7 @@ class GPContext:
     def num_images(self) -> str | None:
         """Return the number of images open, unless the last RPC update sent that number
         as the active image name, in which case we return None"""
-        if _GP_DOCNAME_WAS_DOCCOUNT:
+        if GP_SESSION.docname_was_doccount:
             return None
         if not self.images:
             return "No images open"
@@ -310,7 +324,9 @@ class GPContext:
                 for i in self.images:
                     selected_layers += i.get_selected_layers()
                 count = len(selected_layers)
-                return f"{gp_plural(count, 'layer')} selected in {len(self.images)} images"
+                return (
+                    f"{gp_plural(count, 'layer')} selected in {len(self.images)} images"
+                )
             else:
                 return None
         layers = self.active_image.get_selected_layers()
@@ -474,9 +490,7 @@ def gp_update_large_icon(ctx: GPContext):
 
 
 def gp_push_rpc_update():
-    push_rpc_update(
-        GP_SESSION, GP_DETAILS, GP_PREFS, GP_RPC_CLIENT, "gimp", _gp_warn
-    )
+    push_rpc_update(GP_SESSION, GP_DETAILS, GP_PREFS, GP_RPC_CLIENT, "gimp", _gp_warn)
 
 
 def gp_update_presence():
@@ -539,15 +553,12 @@ _GP_TEMP_PROCEDURES = {
 }
 
 
-def _gp_on_settings_changed():
-    gp_start_timer()
-
-
 def gp_register_temp_procedures(plugin: Gimp.PlugIn):
     global _GP_TEMP_PROCEDURES_REGISTERED
     for proc_name, proc_details in _GP_TEMP_PROCEDURES.items():
         procedure = Gimp.ImageProcedure.new(
-            plugin, proc_name, Gimp.PDBProcType.TEMPORARY, proc_details[0])
+            plugin, proc_name, Gimp.PDBProcType.TEMPORARY, proc_details[0]
+        )
         procedure.set_image_types("*")
         procedure.set_menu_label(proc_details[1])
         procedure.set_documentation(proc_details[2][0], proc_details[2][1], None)
@@ -558,7 +569,7 @@ def gp_register_temp_procedures(plugin: Gimp.PlugIn):
         settings_class=GPSettings,
         current_prefs=GP_PREFS,
         settings_json_path=_GP_PREFS_PATH,  # where to atomically write
-        on_settings_changed=_gp_on_settings_changed,
+        on_settings_changed=gp_start_timer,
     )
     plugin.add_temp_procedure(settings_proc)
     _GP_TEMP_PROCEDURES_REGISTERED = True
@@ -602,7 +613,7 @@ def gp_run(procedure, config, data):  # pylint: disable=unused-argument
 def gp_start_timer():
     global _GP_TIMER_ID
     gp_stop_timer()
-    interval = max(1000, GP_PREFS.generalUpdate * 1000)
+    interval = max(10000, GP_PREFS.generalUpdate * 1000)
     _GP_TIMER_ID = GLib.timeout_add(interval, gp_tick)
 
 

@@ -19,26 +19,27 @@ from pypresence.presence import Presence
 import maya.api.OpenMaya as om  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # pyright: ignore[reportMissingImports]
 import maya.cmds as cmds  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
-from common import (
-    get_file_size_str as mp_read_size,
-    RPCUpdateDetails as MPRPCUpdate,
-    shorten_number as mp_shorten_number,
-)
-from common import update_buttons as mp_update_buttons
 
 from common import (
-    SharedSettings as MPSharedSettings,
+    RPCUpdateDetails,
+    SessionInfo,
+    SharedSettings,
+    RenderSettings,
+    QtSettingsGUIMenu,
+    get_file_size_str,
+    shorten_number,
+    update_buttons,
+    force_clear_on_exit,
+    connect_rpc,
+    push_rpc_update,
+    advance_cycle,
+    update_slot,
+    format_render_details,
+    plural as mp_plural,
     on_render_start as mp_on_render_start,
     on_render_end as mp_on_render_end,
     on_frame_render_end as mp_on_frame_render_end,
-    force_clear_on_exit,
-    SessionInfo as MPPresenceInfo,
-    QtSettingsGUIMenu,
-    connect_rpc as _mp_connect_rpc,
-    push_rpc_update as _mp_push_rpc_update,
-    advance_cycle as mp_advance_cycle,
-    update_slot as mp_update_slot,
-    plural as mp_plural,
+    DISCORD_SHORT_TERM_RATE_LIMIT,
 )
 # pylint: enable=import-error,no-name-in-module,line-too-long,unused-import
 
@@ -48,37 +49,10 @@ from common import (
 
 
 @dataclass
-class MPSettings(MPSharedSettings):
+class MPSettings(SharedSettings, RenderSettings):
     """Store user preferences and persist across sessions with OptionVars"""
 
     # pylint: disable=invalid-name
-    displayEngine: bool = field(
-        default=True,
-        metadata={"group": "Details", "label": "Display active render engine on hover"},
-    )
-    displayGPU: bool = field(
-        default=False,
-        metadata={"group": "Details", "label": "Display GPU name in details"},
-    )
-    displayRenderStats: bool = field(
-        default=True,
-        metadata={"group": "Details", "label": "Display render stats in details"},
-    )
-    displayFileName: bool = field(
-        default=False,
-        metadata={"group": "Details", "label": "Display file name when rendering"},
-    )
-    displayFrames: bool = field(
-        default=True,
-        metadata={"group": "Details", "label": "Display frames rendered in details"},
-    )
-    countExtensions: bool = field(
-        default=True,
-        metadata={
-            "group": "Render Extensions",
-            "label": ("Count lights, materials, and textures from third-party renderers"),
-        },
-    )
     _PREFIX: ClassVar[str] = "mayaPresence_"
     INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
         ("Scene name", "scene"),
@@ -99,6 +73,19 @@ class MPSettings(MPSharedSettings):
         "detailsType": "scene",
         "stateType": "poly",
     }
+    displayGPU: bool = field(
+        default=False,
+        metadata={"group": "Details", "label": "Display GPU name in details"},
+    )
+    countExtensions: bool = field(
+        default=True,
+        metadata={
+            "group": "Render Extensions",
+            "label": (
+                "Count lights, materials, and textures from third-party renderers"
+            ),
+        },
+    )
 
     def __post_init__(self):
         field_types = get_type_hints(MPSettings)
@@ -152,8 +139,8 @@ MP_CALLBACKS: set[Tuple[str, int]] = set()
 MP_TIMER_CALLBACK_ID = None
 MP_SETTINGS_WINDOW = None
 MP_PREFS = MPSettings()
-MP_SESSION = MPPresenceInfo()
-MP_UPDATE_DETAILS = MPRPCUpdate("maya")
+MP_SESSION = SessionInfo()
+MP_UPDATE_DETAILS = RPCUpdateDetails("maya")
 
 
 class MPExtensionMonitor:
@@ -201,8 +188,8 @@ class MPExtensionMonitor:
                 "octaneplugin",
                 "octane",
                 mat_path="rendernode/octane/material",
-                light_path="rendernode/octane/node" # some non-light stuff in here - worth refactor?
-            )
+                light_path="rendernode/octane/node",  # some non-light stuff in here - refactor?
+            ),
         }
 
     def init_engine(self, e: str):
@@ -220,11 +207,7 @@ class MPExtensionMonitor:
     def count(self, category: TypeCategory) -> int:
         types = []
         for engine in self.monitored_engines.values():
-            if (
-                engine.loaded
-                and MP_PREFS.countExtensions
-                and engine.types is not None
-            ):
+            if engine.loaded and MP_PREFS.countExtensions and engine.types is not None:
                 types += engine.types[category.name.lower()]
         return len(cmds.ls(type=types)) if types else 0
 
@@ -320,11 +303,13 @@ class MPContext:
                 faces = polys["face"]
         try:
             vert_str = "vert" if int(verts) == 1 else "verts"
-            verts = mp_shorten_number(int(verts))
+            verts = shorten_number(int(verts))
             face_str = "face" if int(faces) == 1 else "faces"
-            faces = mp_shorten_number(int(faces))
+            faces = shorten_number(int(faces))
             return f"{verts} {vert_str} | {faces} {face_str}"
-        except ValueError: # For some reason during startup verts is occasionally a string
+        except (
+            ValueError
+        ):  # For some reason during startup verts is occasionally a string
             return "Unknown polygon count"
 
     def get_joint_count(self) -> str:
@@ -357,7 +342,7 @@ class MPContext:
     def get_file_size(self) -> str | None:
         p = cast(str, cmds.file(query=True, sceneName=True))
         if p and os.path.exists(p):
-            return mp_read_size(os.path.getsize(p))
+            return get_file_size_str(os.path.getsize(p))
         return None
 
     def get_version_str(self) -> str:
@@ -443,14 +428,6 @@ class MPContext:
 #################
 # Rich Presence #
 #################
-
-
-def mp_connect_rpc():
-    return _mp_connect_rpc(MP_RPC_CLIENT, "Maya")
-
-
-def mp_push_rpc_update(*args):  # pylint: disable=unused-argument
-    _mp_push_rpc_update(MP_SESSION, MP_UPDATE_DETAILS, MP_PREFS, MP_RPC_CLIENT, "Maya")
 
 
 def mp_update_large_icon(ctx: MPContext):
@@ -546,49 +523,33 @@ MP_DISPLAY_TYPES = {
 
 def mp_update_presence_details(ctx: MPContext):
     # Rendering Details
-    # TODO simplify string build
     if MP_PREFS.enableDetails and MP_SESSION.is_rendering:
         res = ctx.get_render_resolution()
         fname = ctx.get_file_name()
         frame_range = ctx.get_frame_range()
         fps = ctx.get_render_fps()
-        MP_UPDATE_DETAILS.details_text = (
-            "Rendering"
-            + (f" {fname}" if fname and MP_PREFS.displayFileName else "")
-            + (
-                ": "
-                if (res is not None and MP_PREFS.displayRenderStats)
-                or (MP_PREFS.displayFrames and frame_range[1])
-                else ""
-            )
-            + (
-                f"{res[0]}x{res[1]}, "
-                if res is not None and MP_PREFS.displayRenderStats
-                else ""
-            )
-            + (
-                f"Frame {MP_SESSION.rendered_frames} of {frame_range[1]}"
-                if MP_PREFS.displayFrames and frame_range[1]
-                else ""
-            )
-            + (f" @{fps}fps" if fps is not None else "")
+        MP_UPDATE_DETAILS.details_text = format_render_details(
+            file_name=fname,
+            res=res,
+            rendered_frames=MP_SESSION.rendered_frames,
+            total_frames=frame_range[1],
+            fps=fps,
+            prefs=MP_PREFS,
         )
     elif MP_PREFS.enableDetails:
-        mp_update_slot(
+        update_slot(
             ctx, "details", MP_PREFS, MP_UPDATE_DETAILS, MP_DISPLAY_TYPES, MP_SESSION
         )
 
 
 def mp_update_presence_state(ctx: MPContext):
-    mp_update_slot(
-        ctx, "state", MP_PREFS, MP_UPDATE_DETAILS, MP_DISPLAY_TYPES, MP_SESSION
-    )
+    update_slot(ctx, "state", MP_PREFS, MP_UPDATE_DETAILS, MP_DISPLAY_TYPES, MP_SESSION)
 
 
 def mp_update_presence():
     if MP_PREFS.generalEnable:
         if MP_PREFS.detailsCycle or MP_PREFS.stateCycle:
-            mp_advance_cycle(MP_SESSION, MP_DISPLAY_TYPES)
+            advance_cycle(MP_SESSION, MP_DISPLAY_TYPES)
         ctx = MPContext.capture()
         if ctx is None:
             return
@@ -596,8 +557,8 @@ def mp_update_presence():
         mp_update_small_icon(ctx)
         mp_update_presence_state(ctx)
         mp_update_presence_details(ctx)
-        mp_update_buttons(MP_UPDATE_DETAILS, MP_PREFS)
-        mp_push_rpc_update()
+        update_buttons(MP_UPDATE_DETAILS, MP_PREFS)
+        push_rpc_update(MP_SESSION, MP_UPDATE_DETAILS, MP_PREFS, MP_RPC_CLIENT, "Maya")
     elif MP_SESSION.connected:
         try:
             MP_RPC_CLIENT.clear()
@@ -615,7 +576,13 @@ class MayaPresenceSettings(MayaQWidgetDockableMixin, QtSettingsGUIMenu):
     pass
 
 
-def mp_show_settings_dialog(prefs, on_change=None):
+def mp_on_setting_change():
+    if time.time() - MP_SESSION.last_update > DISCORD_SHORT_TERM_RATE_LIMIT:
+        mp_update_presence()
+    mp_refresh_timer()
+
+
+def mp_show_settings_dialog():
     global MP_SETTINGS_WINDOW
     if MP_SETTINGS_WINDOW is not None:
         try:
@@ -624,16 +591,12 @@ def mp_show_settings_dialog(prefs, on_change=None):
         except Exception:
             pass
     MP_SETTINGS_WINDOW = MayaPresenceSettings(
-        prefs=prefs, refresh_func=on_change, app_name="Maya"
+        prefs=MP_PREFS, refresh_func=mp_on_setting_change, app_name="Maya"
     )
     MP_SETTINGS_WINDOW.show()
     MP_SETTINGS_WINDOW.raise_()
     MP_SETTINGS_WINDOW.activateWindow()
     return MP_SETTINGS_WINDOW
-
-
-def mp_open_settings_menu():
-    mp_show_settings_dialog(MP_PREFS, on_change=mp_push_rpc_update)
 
 
 def _mp_add_settings_menu_item():
@@ -645,7 +608,7 @@ def _mp_add_settings_menu_item():
         "mayaPresenceSettingsMenuItem",
         label="Maya Presence Settings…",
         parent="mainWindowMenu",
-        command=lambda *_: mp_open_settings_menu(),
+        command=lambda *_: mp_show_settings_dialog(),
     )
 
 
@@ -668,7 +631,9 @@ def mp_install_settings_menu():
         return
     if MP_MENU_PMC in existing_pmc:
         return  # already hooked
-    cmds.menu("mainWindowMenu", edit=True, postMenuCommand=existing_pmc + ";;" + MP_MENU_PMC)
+    cmds.menu(
+        "mainWindowMenu", edit=True, postMenuCommand=existing_pmc + ";;" + MP_MENU_PMC
+    )
 
 
 def mp_uninstall_settings_menu():
@@ -925,7 +890,7 @@ def mp_check_loaded_engines():
 def mp_start():
     if cmds.about(batch=True):
         return
-    MP_SESSION.connected = mp_connect_rpc()
+    MP_SESSION.connected = connect_rpc(MP_RPC_CLIENT, "Maya")
     MP_SESSION.start_time = time.time()
     if MP_PREFS.displayRenderStats:
         mp_install_render_handlers()

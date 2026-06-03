@@ -380,31 +380,12 @@ def test_advance_cycle_wraps():
 # Render-session event handlers
 # ---------------------------------------------------------------------------
 
-def test_on_render_start_resets_timer_when_pref_set():
-    session = SessionInfo()
-    session.is_rendering = False
-    original_start = session.start_time
-    prefs = SimpleNamespace(resetTimer=True)
-    on_render_start(session, prefs)
-    assert session.is_rendering is True
-    assert session.start_time != original_start or session.start_time >= original_start
-
-
-def test_on_render_start_preserves_timer_when_pref_unset():
-    session = SessionInfo()
-    session.start_time = 12345.0
-    prefs = SimpleNamespace(resetTimer=False)
-    on_render_start(session, prefs)
-    assert session.is_rendering is True
-    assert session.start_time == 12345.0
-
 
 def test_on_render_end_clears_state():
     session = SessionInfo()
     session.is_rendering = True
     session.rendered_frames = 47
-    prefs = SimpleNamespace(resetTimer=False)
-    on_render_end(session, prefs)
+    on_render_end(session)
     assert session.is_rendering is False
     assert session.rendered_frames == 0
 
@@ -576,16 +557,18 @@ def test_push_rpc_update_when_connected_calls_update():
     assert client.update_call_count == 1
 
 
-def test_push_rpc_update_when_disconnected_retries_connect():
+def test_push_rpc_update_when_disconnected_retries_and_pushes():
+    """When push_rpc_update is invoked on a disconnected session, the
+    reconnect-then-immediately-retry path runs: connect_rpc flips
+    session.connected to True, and the recursive call pushes the update
+    in the same tick (no waiting for the next timer event)."""
     client = _FakePresence()
     session = SessionInfo()
     session.connected = False
     push_rpc_update(session, _make_update_details(), _push_prefs(), client,
                     "app", error=lambda _: None)
-    # connect_rpc was attempted, success path sets session.connected back True.
     assert session.connected is True
-    # No update call this round; retry happens next tick.
-    assert client.update_call_count == 0
+    assert client.update_call_count == 1
 
 
 def _instantiate_exc(exc_cls):
@@ -778,37 +761,6 @@ def test_jsonsharedsettings_reset_restores_defaults(tmp_path):
     assert s.enabled is True
 
 
-def test_jsonsharedsettings_refresh_callback_fires_on_interval_change(tmp_path):
-    """When generalUpdate (or, in our test surrogate, `interval`) changes
-    between writes, the optional refresh_func is invoked. The base class's
-    name is generalUpdate but the dispatch is by value identity, so this
-    test uses a surrogate field also named 'generalUpdate'."""
-
-    @dataclass
-    class _SurrogateSettings(JSONSharedSettings):
-        _INITIAL_DEFAULTS: ClassVar[Dict[str, _Any]] = {}
-        generalUpdate: int = 12
-        misc: str = "x"
-
-    p = tmp_path / "prefs.json"
-    p.write_text(_json.dumps({"generalUpdate": 12, "misc": "x"}))
-    refresh_calls: list[int] = []
-    s = _SurrogateSettings()
-    s.setup_persistence(
-        str(p), app_name="test", refresh_func=lambda: refresh_calls.append(1),
-    )
-    # First _write at the current interval should not fire the callback.
-    s._write()
-    assert refresh_calls == []
-    # Now change generalUpdate and write — callback should fire.
-    s.generalUpdate = 30
-    s._write()
-    assert refresh_calls == [1]
-    # Subsequent writes without a change don't re-fire.
-    s._write()
-    assert refresh_calls == [1]
-
-
 # ---------------------------------------------------------------------------
 # RPCBasePlugin.update_presence: generalEnable=False clear semantics
 # (the same bug applied across Painter/Krita/Designer via the common base;
@@ -894,26 +846,8 @@ def test_rpcbase_update_presence_disabled_clear_failure_marks_disconnected():
     assert any("clear failed" in e for e in errors)
 
 
-def test_jsonsharedsettings_refresh_callback_exceptions_propagate(tmp_path):
-    """Documents the current behavior: a refresh_func exception is NOT caught
-    by _write, so it propagates out and the disk write is skipped. The plugin
-    is expected to provide a callback that doesn't throw (timer.refresh()
-    is safe). If you ever want to wrap this in try/except, also flip this
-    test to assert successful persistence + warning emission."""
-
-    @dataclass
-    class _SurrogateSettings(JSONSharedSettings):
-        _INITIAL_DEFAULTS: ClassVar[Dict[str, _Any]] = {}
-        generalUpdate: int = 12
-
-    p = tmp_path / "prefs.json"
-    p.write_text(_json.dumps({"generalUpdate": 12}))
-
-    def _bad_refresh():
-        raise RuntimeError("explosion")
-
-    s = _SurrogateSettings()
-    s.setup_persistence(str(p), app_name="test", refresh_func=_bad_refresh)
-    s.generalUpdate = 30
-    with pytest.raises(RuntimeError, match="explosion"):
-        s._write()
+# The previous test_jsonsharedsettings_refresh_callback_exceptions_propagate
+# covered _write's behavior when refresh_func raised. JSONSharedSettings no
+# longer carries refresh_func at all — RPC update scheduling moved to
+# RPCBasePlugin.on_general_update_change — so the behavior the test pinned
+# doesn't exist anymore. Removed rather than rewritten.

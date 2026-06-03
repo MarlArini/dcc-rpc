@@ -5,15 +5,15 @@ https://github.com/abrasic/blendpresence. C4DPresence has been tested on Cinema
 """
 
 import atexit
-from enum import IntEnum, auto
-from typing import Tuple, List, ClassVar, Dict, Any
-from pathlib import Path
 from dataclasses import dataclass, field
+from enum import auto, IntEnum
 import os
 import sys
 import time
+from typing import Any, ClassVar, Dict, List, Tuple
+from pathlib import Path
 
-import c4d
+import c4d  # pylint: disable=import-error
 
 # Bootstrap: ensure this plugin's directory is on sys.path so the sibling
 # common.py and pypresence/ resolve when loaded by the host application.
@@ -21,9 +21,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from pypresence.presence import Presence
+# These imports have to happen after the bootstrap; silence the linters
+from pypresence.presence import Presence  # noqa: E402 pylint: disable=wrong-import-position
 
-from common import (
+from common import (  # noqa: E402 pylint: disable=wrong-import-position
     get_file_size_str,
     SharedSettings,
     plural,
@@ -35,6 +36,8 @@ from common import (
     update_slot,
     advance_cycle,
     force_clear_on_exit,
+    RenderSettings,
+    format_render_details,
 )
 
 
@@ -55,65 +58,39 @@ _C4D_RENDER_ENGINES = {
     1029988: "Arnold",
 }
 
+# fmt: off
 _LIGHTS: frozenset[int] = frozenset(
     [
-        c4d.Olight,
-        c4d.Osky,
-        c4d.Oenvironment,
-        1053282,  # V-Ray
-        1053279,
-        1053276,
-        1053275,
-        1061436,
-        1053287,
-        1053278,
-        1059898,
-        1053277,
-        1053281,
-        1053280,
-        1036751,  # Redshift
-        1036754,
+        c4d.Olight, c4d.Osky, c4d.Oenvironment, # Base C4D
+        1053282, 1053279, 1053276, 1053275, 1061436, 1053287,
+        1053278, 1059898, 1053277, 1053281, 1053280, #V-Ray
+        1036751, 1036754, # Redshift
         1030424,  # Arnold
-    ]
+    ] # Note: Octane lights and one V-Ray light are nulls, handled in C4DContext
 )
 
+# All deformers and generators listed in the C4D MoGraph menu
 _MG_GENERATORS_DEFORMERS: frozenset[int] = frozenset(
     [
-        c4d.Omgcloner,
-        c4d.Omgmatrix,
-        c4d.Omgscatter,
-        c4d.Omgfracture,
-        c4d.Omgvoronoifracture,
-        c4d.Omginstance,
-        c4d.Omgtracer,
-        c4d.Omgsplinegen,
-        c4d.Omgextrude,
-        c4d.Omgpolyfx,
+        c4d.Omgcloner, c4d.Omgmatrix, c4d.Omgscatter, c4d.Omgfracture,
+        c4d.Omgvoronoifracture, c4d.Omginstance, c4d.Omgtracer,
+        c4d.Omgsplinegen, c4d.Omgextrude, c4d.Omgpolyfx,
     ]
 )
 
+# All effectors listed in the C4D MoGraph menu, plus a few not listed
+# but with c4d.Obaseeffector description, e.g., c4d.Omgcoffee
 _MG_EFFECTORS: frozenset[int] = frozenset(
     [
-        c4d.Omgplain,
-        c4d.Omgdelay,
-        c4d.Omgformula,
-        c4d.Omginheritance,
-        c4d.Omgpushapart,
-        c4d.Omgpython,
-        c4d.Omgrandom,
-        c4d.Omgreeffector,
-        c4d.Omgshader,
-        c4d.Omgsound,
-        c4d.Omgspline,
-        c4d.Omgstep,
-        c4d.Omgeffectortarget,
-        c4d.Omgtime,
-        c4d.Omgvolume,
-        c4d.Omgcoffee,
-        c4d.Omgroup,
+        c4d.Omgplain, c4d.Omgdelay, c4d.Omgformula, c4d.Omginheritance,
+        c4d.Omgpushapart, c4d.Omgpython, c4d.Omgrandom, c4d.Omgreeffector,
+        c4d.Omgshader, c4d.Omgsound, c4d.Omgspline, c4d.Omgstep, c4d.Omgeffectortarget,
+        c4d.Omgtime, c4d.Omgvolume, c4d.Omgcoffee, c4d.Omgroup,
     ]
 )
+# fmt: on
 
+# Possible responses to document.GetMode(), mapped to string names
 _C4D_MODES = {
     c4d.Mcamera: "Camera",
     c4d.Mobject: "Object",
@@ -135,6 +112,11 @@ _C4D_MODES = {
     c4d.Medgepoint: "Edge / Point",
     c4d.Mworkplane: "Workplane",
 }
+
+
+################################################################
+# Preference menu enum -> preference class mapping & utilities #
+################################################################
 
 
 class C4DP(IntEnum):
@@ -262,27 +244,11 @@ def _c4d_set(basecontainer, kind, param_id, value):
 
 
 @dataclass
-class C4DPSettings(SharedSettings):
+class C4DPSettings(SharedSettings, RenderSettings):
     # pylint: disable=invalid-name
-    displayEngine: bool = field(
-        default=True,
-        metadata={"group": "Details", "label": "Display active render engine on hover"},
-    )
     displayGPU: bool = field(
         default=True,
         metadata={"group": "Details", "label": "Display GPU name in details"},
-    )
-    displayRenderStats: bool = field(
-        default=True,
-        metadata={"group": "Details", "label": "Display render stats in details"},
-    )
-    displayFileName: bool = field(
-        default=False,
-        metadata={"group": "Details", "label": "Display file name when rendering"},
-    )
-    displayFrames: bool = field(
-        default=True,
-        metadata={"group": "Details", "label": "Display frames rendered in details"},
     )
     _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
         "detailsType": "document",
@@ -313,6 +279,7 @@ C4DP_CLIENT = Presence("1510781737238528020")
 
 
 def _walk_objects(roots: List[c4d.BaseObject]):
+    """Helper to walk scene graph and count all objects"""
     objs: List[c4d.BaseObject] = []
 
     def walk(obj: c4d.BaseObject):
@@ -380,7 +347,7 @@ class C4DContext:
                 if o.GetType() in _LIGHTS
                 or (
                     o.GetType() == 5140 and o.GetTypeName() == "Light"
-                )  # Octane lights are nulls
+                )  # Octane lights + one V-Ray light are nulls
             ]
         )
         return plural(lights, "light")
@@ -527,32 +494,18 @@ C4DP_DISPLAY_TYPES = {
 
 def c4d_update_presence_details(ctx: C4DContext):
     # Rendering Details
-    # TODO simplify string build
     if C4DP_PREFS.enableDetails and C4DP_SESSION.is_rendering:
         res = ctx.get_render_resolution()
         fname = ctx.get_document_name()
         frame_range = ctx.get_frame_range()
         fps = ctx.get_fps()
-        C4DP_UPDATE_DETAILS.details_text = (
-            "Rendering"
-            + (f" {fname}" if fname and C4DP_PREFS.displayFileName else "")
-            + (
-                ": "
-                if (res is not None and C4DP_PREFS.displayRenderStats)
-                or (C4DP_PREFS.displayFrames and frame_range[1])
-                else ""
-            )
-            + (
-                f"{res[0]}x{res[1]}, "
-                if res is not None and C4DP_PREFS.displayRenderStats
-                else ""
-            )
-            + (
-                f"Frame {C4DP_SESSION.rendered_frames} of {frame_range[1]}"
-                if C4DP_PREFS.displayFrames and frame_range[1]
-                else ""
-            )
-            + (f" @{fps}fps" if fps is not None else "")
+        C4DP_UPDATE_DETAILS.details_text = format_render_details(
+            file_name=fname,
+            res=res,
+            rendered_frames=C4DP_SESSION.rendered_frames,
+            total_frames=frame_range[1],
+            fps=fps,
+            prefs=C4DP_PREFS,
         )
     elif C4DP_PREFS.enableDetails:
         update_slot(
@@ -620,6 +573,11 @@ def _reset_prefs(basecontainer):
 
 
 class C4DPresencePrefs(c4d.plugins.PreferenceData):
+    """Registers a container in the Cinema 4D preferences menu for plugin
+    settings. Also catches messages, since the MessageData plugin can only
+    handle CoreMessage events and events related to rendering and files
+    are regular messages."""
+
     # pylint: disable=invalid-name, unused-argument, redefined-builtin
 
     def GetBaseContainer(self) -> c4d.BaseContainer:
@@ -737,6 +695,12 @@ class C4DPresencePrefs(c4d.plugins.PreferenceData):
 
 
 class C4DPPresenceMessage(c4d.plugins.MessageData):
+    """Simple core of the plugin. Registers a MessageData plugin that fires a
+    timer every 1000ms and checks whether enough time has elapsed since the
+    last update to do another one. This also means there's no need for a special
+    handler for settings updates where the generalUpdate rate is changed, since
+    the settings are effectively checked every second."""
+
     # pylint: disable=invalid-name, unused-argument, redefined-builtin
     last_update: float = time.time()
 

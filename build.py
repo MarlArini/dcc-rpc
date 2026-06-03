@@ -10,7 +10,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
 DIST = REPO / "dist"
-COMMON_SRC = REPO / "common" / "common.py"
+COMMON_SRC = REPO / "common"
 COLOR_SRC = REPO / "colors"  # package dir (color_find.py + palette.csv + iscc-nbs.csv + Attribution.txt)
 
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "build")
@@ -27,50 +27,38 @@ def _find_pypresence() -> Path:
     return Path(pypresence.__file__).resolve().parent
 
 
-def _to_relative_imports(text: str, modules: list[str]) -> str:
-    """Prepend a leading dot to every `from <mod>` import line in `text` for
+def _to_relative_imports(text: str, modules: list[str], prefix: str = ".") -> str:
+    """Prepend a prefix (defaults to a leading dot) to every `from <mod>` import line in `text` for
     each name in `modules`.
 
     Handles both bare-form (`from common import X`) and submodule-form
     (`from pypresence.presence import Presence`). Does not touch lines that
     are already relative (`from .common`) or imports of unrelated names that
     happen to start with the same prefix.
-
-    Why this matters: Adobe Substance Painter, Designer, and Krita do not
-    reliably add the loaded plug-in's directory to sys.path before running
-    module-level imports, so absolute imports of bundled siblings
-    (`from common`, `from colors`, `from pypresence`) fail with
-    ModuleNotFoundError at load time. Converting them to relative imports
-    during the build sidesteps the sys.path question entirely. (GIMP plug-ins
-    are run as scripts and so don't have a package context for relative
-    imports to resolve against — they keep absolute imports plus an explicit
-    sys.path.insert at the top of the entry point.)
     """
     result = text
     for mod in modules:
-        # `from common ` -> `from .common ` ; `from common.X` -> `from .common.X`.
         # The trailing space / dot match prevents accidentally rewriting an
         # unrelated module that happens to start with the same prefix.
-        result = result.replace(f"from {mod} ", f"from .{mod} ")
-        result = result.replace(f"from {mod}.", f"from .{mod}.")
+        result = result.replace(f"from {mod} ", f"from {prefix}{mod} ")
+        result = result.replace(f"from {mod}.", f"from {prefix}{mod}.")
     return result
 
 
 def _validate_python(path: Path) -> None:
     """ast.parse the file so a broken rewrite is caught at build time, not at
-    plugin-load time inside the host application (where the error surface
-    can be a silent failure or a console buried behind a UI)."""
+    plugin-load time inside the host application."""
     try:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except SyntaxError as e:
         sys.exit(f"[build] rewritten file {path} has a syntax error: {e}")
 
 
-def _write_rewritten(src: Path, dst: Path, modules: list[str]) -> None:
+def _write_rewritten(src: Path, dst: Path, modules: list[str], prefix: str = ".") -> None:
     """Read `src`, apply _to_relative_imports for `modules`, write to `dst`,
     and ast.parse the result to catch breakage at build time."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    rewritten = _to_relative_imports(src.read_text(encoding="utf-8"), modules)
+    rewritten = _to_relative_imports(src.read_text(encoding="utf-8"), modules, prefix)
     dst.write_text(rewritten, encoding="utf-8")
     _validate_python(dst)
 
@@ -78,35 +66,24 @@ def _write_rewritten(src: Path, dst: Path, modules: list[str]) -> None:
 def _write_common_subpackage(parent: Path, pypresence_src: Path) -> None:
     """Build a `common/` subpackage under `parent`:
         common/
-          __init__.py     (the COMMON_SRC content with `from pypresence` rewritten
-                           to `from .pypresence`)
-          pypresence/     (third-party, nested as a sibling of __init__.py)
-
-    Used by Designer and Krita. Both hosts need common.py and pypresence in a
-    self-contained subpackage so the relative imports resolve without any
-    sys.path setup at plugin-load time. common.py auto-detects whatever Qt
-    binding the host ships (PySide6 for Designer, PyQt5 for Krita), so no
-    binding-specific rewriting is needed.
+          __init__.py
+          ...
+          pypresence/     (third-party, nested as a subpackage)
     """
     common_dir = parent / "common"
-    common_dir.mkdir()
-    init_path = common_dir / "__init__.py"
-    _write_rewritten(COMMON_SRC, init_path, modules=["pypresence"])
+    shutil.copytree(COMMON_SRC, common_dir, ignore=IGNORE)
+    for py_file in common_dir.glob("*.py"):
+        _write_rewritten(py_file, py_file, modules=["pypresence"])
     shutil.copytree(pypresence_src, common_dir / "pypresence", ignore=IGNORE)
 
 
 def _drop_runtime(target: Path, pypresence_src: Path, colors: bool = False) -> None:
     """
-    Copy common.py, pypresence/, and optionally the color-name package into a
+    Copy common/, pypresence/, and optionally the color-name package into a
     target directory. The target directory must already exist.
-
-    Used by bundles whose host (Maya, Nuke) reliably puts the plugin directory
-    on sys.path before running module-level imports, so absolute imports of
-    siblings work. Painter and Designer don't honor that contract — see
-    _bundle_painter / _bundle_designer for the relative-import variants.
     """
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(COMMON_SRC, target / "common.py")
+    shutil.copytree(COMMON_SRC, target / "common", ignore=IGNORE)
     if colors:
         shutil.copytree(COLOR_SRC, target / "colors", ignore=IGNORE)
     shutil.copytree(pypresence_src, target / "pypresence", ignore=IGNORE)
@@ -235,12 +212,16 @@ def _bundle_painter(pypresence_src: Path) -> None:
         dst=dst / "painter_presence.py",
         modules=["common", "colors", "pypresence"],
     )
-    # common.py: rewrite the pypresence imports.
-    _write_rewritten(
-        src=COMMON_SRC,
-        dst=dst / "common.py",
-        modules=["pypresence"],
-    )
+    # common package: rewrite the pypresence imports to use prefix ".."
+    common_dir = dst / "common"
+    shutil.copytree(COMMON_SRC, common_dir, ignore=IGNORE)
+    for py_file in common_dir.glob("*.py"):
+        _write_rewritten(
+            src=py_file,
+            dst=py_file,
+            modules=["pypresence"],
+            prefix="..",
+        )
     # colors/ uses internal relative imports already — copy as-is.
     shutil.copytree(COLOR_SRC, dst / "colors", ignore=IGNORE)
     # pypresence/ is third-party — keep as-is.

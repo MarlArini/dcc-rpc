@@ -227,11 +227,22 @@ resource = SimpleNamespace(
 # ui.get_main_window().
 
 class _FakeQAction:
-    def __init__(self, text: str = ""):
+    def __init__(self, text: str = "", object_name: str = ""):
         self._text = text
+        self._object_name = object_name
+        # `menu()` returns a sub-menu when this action represents a menubar
+        # submenu; tests that exercise menubar walks set this via
+        # _menubar_with_discord_menu(...).
+        self._submenu: Optional[Any] = None
 
     def text(self) -> str:
         return self._text
+
+    def objectName(self) -> str:  # noqa: N802
+        return self._object_name
+
+    def menu(self):
+        return self._submenu
 
 
 class _FakeQColor:
@@ -360,8 +371,8 @@ def make_qt_widget(widget_class: str, object_name: str = "", **kwargs) -> _FakeQ
     return _FakeQWidget(widget_class=widget_class, object_name=object_name, **kwargs)
 
 
-def make_qt_action(text: str = "") -> _FakeQAction:
-    return _FakeQAction(text=text)
+def make_qt_action(text: str = "", object_name: str = "") -> _FakeQAction:
+    return _FakeQAction(text=text, object_name=object_name)
 
 
 def make_qt_main_window(children: Optional[List[_FakeQWidget]] = None) -> _FakeQWidget:
@@ -376,12 +387,28 @@ def make_tool_button(
     action_text: str = "",
     checked: bool = False,
     object_name: str = "",
+    action_object_name: str = "",
 ) -> _FakeQWidget:
+    """Build a checked-or-unchecked QToolButton whose `defaultAction()` returns
+    a QAction with the given `text` (localized hover label) and `objectName`
+    (English-stable identifier the plugin maps to icon keys).
+
+    Pass `action_object_name` (or `action_text` for legacy callers) — when
+    `action_object_name` is empty, the action's objectName defaults to the
+    text so single-arg callers stay working.
+    """
+    if action_text or action_object_name:
+        action = _FakeQAction(
+            text=action_text,
+            object_name=action_object_name or action_text,
+        )
+    else:
+        action = None
     return _FakeQWidget(
         widget_class="QToolButton",
         object_name=object_name,
         checked=checked,
-        default_action=_FakeQAction(action_text) if action_text else None,
+        default_action=action,
     )
 
 

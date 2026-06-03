@@ -34,7 +34,7 @@ def test_capture_returns_context_when_everything_present(sp):
     stack = sp.make_stack()
     ts = [sp.make_texture_set()]
     sp.set_state(active_stack=stack, texture_sets=ts)
-    ctx = SPContext.capture()
+    ctx = SPContext.capture(active_only=False)
     assert ctx is not None
     assert ctx.stack is stack
     assert ctx.texture_sets == ts
@@ -49,14 +49,14 @@ def test_capture_returns_context_when_everything_present(sp):
 )
 def test_capture_swallows_runtime_errors(sp, exc):
     sp.set_state(capture_raises=exc)
-    assert SPContext.capture() is None
+    assert SPContext.capture(active_only=False) is None
 
 
 def test_capture_swallows_painter_exception_types(sp):
     sp.set_state(capture_raises=sp.exception.ProjectError("no project"))
-    assert SPContext.capture() is None
+    assert SPContext.capture(active_only=False) is None
     sp.set_state(capture_raises=sp.exception.ServiceNotFoundError("service down"))
-    assert SPContext.capture() is None
+    assert SPContext.capture(active_only=False) is None
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def test_capture_swallows_painter_exception_types(sp):
 
 def test_get_project_name_with_project(sp):
     sp.set_state(project_name="MyProject")
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None)
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None, active_only=False)
     assert ctx.get_project_name() == "Project: MyProject"
 
 
@@ -75,7 +75,7 @@ def test_get_project_name_unsaved_shows_unsaved_not_no_project(sp):
     'No project open', which is the ProjectError path (handled upstream in
     capture)."""
     sp.set_state(project_name=None)
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None)
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None, active_only=False)
     out = ctx.get_project_name()
     assert out is not None
     assert "No project open" not in out
@@ -98,21 +98,21 @@ def test_get_project_name_unsaved_shows_unsaved_not_no_project(sp):
 )
 def test_get_num_meshes(sp, mesh_groups, expected):
     ts = [sp.make_texture_set(mesh_names=names) for names in mesh_groups]
-    ctx = SPContext(texture_sets=ts, stack=sp.make_stack(), main_window=None)
+    ctx = SPContext(texture_sets=ts, stack=sp.make_stack(), main_window=None, active_only=False)
     assert ctx.get_num_meshes() == expected
 
 
 @pytest.mark.parametrize("n", [0, 1, 5, 100])
 def test_get_num_texsets(sp, n):
     ts = [sp.make_texture_set() for _ in range(n)]
-    ctx = SPContext(texture_sets=ts, stack=sp.make_stack(), main_window=None)
+    ctx = SPContext(texture_sets=ts, stack=sp.make_stack(), main_window=None, active_only=False)
     assert ctx.get_num_texsets() == n
 
 
 def test_get_active_texset_name(sp):
     mat = sp.make_material(name="bricks_diffuse")
     stack = sp.make_stack(material=mat)
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_texset_name() == "bricks_diffuse"
 
 
@@ -128,20 +128,20 @@ def test_get_active_texset_name(sp):
 def test_get_material_resolution_str(sp, w, h, expected):
     mat = sp.make_material(res_w=w, res_h=h)
     stack = sp.make_stack(material=mat)
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_material_resolution_str() == expected
 
 
 def test_get_active_texset_info_combines(sp):
     mat = sp.make_material(name="bricks", res_w=2048, res_h=2048)
     stack = sp.make_stack(material=mat)
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_texset_info() == "Texture set: bricks (2048x2048)"
 
 
 def test_get_layer_num_channels(sp):
     stack = sp.make_stack(channels=[object(), object(), object()])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_layer_num_channels() == "3 channels"
 
 
@@ -149,14 +149,18 @@ def test_get_layer_num_channels(sp):
 # Layers (flat, nested groups, selected, blend mode)
 # ---------------------------------------------------------------------------
 
-def test_get_num_layers_flat(sp):
+def test_get_num_layers_flat_active_vs_all(sp):
+    """Same single-stack, same 4 leaves: active_only=True formats as 'N active
+    layers'; active_only=False formats as 'N layers'. The numerical count is
+    identical in this single-stack setup — the test exercises the branch
+    selection driven by the `active_only` field on SPContext."""
     leaves = [sp.make_layer(f"L{i}") for i in range(4)]
     stack = sp.make_stack(root_nodes=leaves)
-    ctx = SPContext(texture_sets=[sp.make_texture_set(stacks=[stack])], stack=stack, main_window=None)
-    # active_only=True walks just `stack`
-    assert ctx.get_num_layers(active_only=True) == "4 active layers"
-    # full walk: only one stack with the same 4 leaves
-    assert ctx.get_num_layers(active_only=False) == "4 layers"
+    ts = [sp.make_texture_set(stacks=[stack])]
+    assert SPContext(texture_sets=ts, stack=stack, main_window=None,
+                     active_only=True).get_num_layers() == "4 active layers"
+    assert SPContext(texture_sets=ts, stack=stack, main_window=None,
+                     active_only=False).get_num_layers() == "4 layers"
 
 
 def test_get_num_layers_nested_groups(sp):
@@ -176,9 +180,10 @@ def test_get_num_layers_nested_groups(sp):
         texture_sets=[sp.make_texture_set(stacks=[stack])],
         stack=stack,
         main_window=None,
+        active_only=True,
     )
     # Counts leaves only: L1, L2, L3, L4 = 4
-    assert ctx.get_num_layers(active_only=True) == "4 active layers"
+    assert ctx.get_num_layers() == "4 active layers"
 
 
 def test_get_num_layers_multi_texset(sp):
@@ -188,42 +193,74 @@ def test_get_num_layers_multi_texset(sp):
         sp.make_texture_set(stacks=[s1]),
         sp.make_texture_set(stacks=[s2]),
     ]
-    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None)
-    assert ctx.get_num_layers(active_only=False) == "3 layers"
+    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None, active_only=False)
+    assert ctx.get_num_layers() == "3 layers"
 
 
-def test_get_active_layer_name_no_selection(sp):
+# --- _get_active_layer_raw ---
+# The refactor replaced the public get_active_layer_name with a private
+# helper that returns either the single layer's name (str) or the count of
+# selected layers (int). The "Layer: " prefix and multi-select phrasing are
+# now in get_active_layer_info; see the tests just below.
+
+def test_get_active_layer_raw_no_selection_returns_zero(sp):
+    """Empty selection → count of 0 (int)."""
     stack = sp.make_stack(selected_nodes=[])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
-    assert ctx.get_active_layer_name() is None
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None,
+                    active_only=False)
+    assert ctx._get_active_layer_raw() == 0
 
 
-def test_get_active_layer_name_single_with_word_layer(sp):
-    """If the layer name already contains 'layer', no prefix added."""
-    stack = sp.make_stack(selected_nodes=[sp.make_layer("Layer 3")])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
-    assert ctx.get_active_layer_name() == "Layer 3"
-
-
-def test_get_active_layer_name_single_without_word_layer(sp):
-    """Otherwise, prefix with 'Layer:'."""
+def test_get_active_layer_raw_single_selection_returns_name(sp):
+    """Exactly-one selection → the layer name (str)."""
     stack = sp.make_stack(selected_nodes=[sp.make_layer("Decals")])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
-    assert ctx.get_active_layer_name() == "Layer: Decals"
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None,
+                    active_only=False)
+    assert ctx._get_active_layer_raw() == "Decals"
 
 
-def test_get_active_layer_name_multi_select(sp):
+def test_get_active_layer_raw_multi_selection_returns_count(sp):
+    """Multi-selection → the count (int)."""
     stack = sp.make_stack(selected_nodes=[
         sp.make_layer("A"), sp.make_layer("B"), sp.make_layer("C"),
     ])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
-    assert ctx.get_active_layer_name() == "3 layers currently selected"
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None,
+                    active_only=False)
+    assert ctx._get_active_layer_raw() == 3
+
+
+# --- get_active_layer_info ---
+# Composed presentation of _get_active_layer_raw. Word-"layer" handling
+# (skip the "Layer: " prefix when the layer's own name already says "layer")
+# is exercised here too.
+
+def test_get_active_layer_info_single_with_word_layer_skips_prefix(sp):
+    stack = sp.make_stack(selected_nodes=[sp.make_layer("Layer 3")])
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None,
+                    active_only=False)
+    assert ctx.get_active_layer_info() == "Layer 3"
+
+
+def test_get_active_layer_info_single_without_word_layer_adds_prefix(sp):
+    stack = sp.make_stack(selected_nodes=[sp.make_layer("Decals")])
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None,
+                    active_only=False)
+    assert ctx.get_active_layer_info() == "Layer: Decals"
+
+
+def test_get_active_layer_info_multi_select_reports_count(sp):
+    stack = sp.make_stack(selected_nodes=[
+        sp.make_layer("A"), sp.make_layer("B"), sp.make_layer("C"),
+    ])
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None,
+                    active_only=False)
+    assert ctx.get_active_layer_info() == "3 layers selected"
 
 
 def test_get_active_layer_blend_mode_mask(sp):
     layer = sp.make_layer("Mask", blend_mode="Multiply", is_mask=True)
     stack = sp.make_stack(selected_nodes=[layer])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_layer_blend_mode() == "Multiply"
 
 
@@ -231,27 +268,27 @@ def test_get_active_layer_blend_mode_non_mask_returns_none(sp):
     """Currently the plugin only reports blend mode for mask-stack layers."""
     layer = sp.make_layer("L", blend_mode="Multiply", is_mask=False)
     stack = sp.make_stack(selected_nodes=[layer])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_layer_blend_mode() is None
 
 
 def test_get_active_layer_info_no_blend(sp):
     layer = sp.make_layer("Decals", is_mask=False)
     stack = sp.make_stack(selected_nodes=[layer])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_layer_info() == "Layer: Decals"
 
 
 def test_get_active_layer_info_with_blend_on_mask(sp):
     layer = sp.make_layer("Layer 3", blend_mode="Screen", is_mask=True)
     stack = sp.make_stack(selected_nodes=[layer])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_layer_info() == "Layer 3 (Screen)"
 
 
 def test_get_active_layer_info_returns_none_when_unselected(sp):
     stack = sp.make_stack(selected_nodes=[])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_layer_info() is None
 
 
@@ -259,39 +296,56 @@ def test_get_active_layer_info_returns_none_when_unselected(sp):
 # UV tiles
 # ---------------------------------------------------------------------------
 
-def test_get_num_uv_tiles_no_tiles_returns_none(sp):
+def test_get_num_uv_tiles_active_no_tiles_returns_none(sp):
+    """active_only=True + active stack's material has no UV tiles → None."""
     mat = sp.make_material(uv_tiles=None)
     stack = sp.make_stack(material=mat)
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
-    assert ctx.get_num_uv_tiles(active_only=True) is None
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=True)
+    assert ctx.get_num_uv_tiles() is None
 
 
-def test_get_num_uv_tiles_active_only(sp):
+def test_get_num_uv_tiles_active_returns_count(sp):
     tiles = [object(), object(), object()]
     mat = sp.make_material(uv_tiles=tiles)
     stack = sp.make_stack(material=mat)
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
-    assert ctx.get_num_uv_tiles(active_only=True) == 3
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=True)
+    assert ctx.get_num_uv_tiles() == 3
 
 
-def test_get_num_uv_tiles_all_texsets_below_two_returns_none(sp):
-    """Implementation returns None when total < 2 (treats < 2 as 'no UV tiles')."""
+def test_get_num_uv_tiles_all_texsets_no_tiles_anywhere_returns_none(sp):
+    """active_only=False + every stack lacks UV tiles → None (no nonzero
+    count to report)."""
     mat = sp.make_material(uv_tiles=None)
     stack = sp.make_stack(material=mat)
     ts = [sp.make_texture_set(stacks=[stack])]
-    ctx = SPContext(texture_sets=ts, stack=stack, main_window=None)
-    assert ctx.get_num_uv_tiles(active_only=False) is None
+    ctx = SPContext(texture_sets=ts, stack=stack, main_window=None, active_only=False)
+    assert ctx.get_num_uv_tiles() is None
 
 
 def test_get_num_uv_tiles_all_texsets_aggregates(sp):
+    """active_only=False sums across all stacks. Previously the plugin
+    returned None when the aggregate was < 2; the refactor changed this to
+    return any nonzero count, so a single-tile project surfaces '1 UV tile'
+    rather than being suppressed."""
     s1 = sp.make_stack(material=sp.make_material(uv_tiles=[object(), object()]))
     s2 = sp.make_stack(material=sp.make_material(uv_tiles=[object()]))
     ts = [
         sp.make_texture_set(stacks=[s1]),
         sp.make_texture_set(stacks=[s2]),
     ]
-    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None)
-    assert ctx.get_num_uv_tiles(active_only=False) == 3
+    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None, active_only=False)
+    assert ctx.get_num_uv_tiles() == 3
+
+
+def test_get_num_uv_tiles_aggregate_single_tile_no_longer_suppressed(sp):
+    """Regression: the prior implementation treated a 1-tile aggregate as
+    'no tiles' (`if count < 2: return None`). The refactor reports any
+    nonzero count, so a one-tile project now surfaces the count."""
+    s1 = sp.make_stack(material=sp.make_material(uv_tiles=[object()]))
+    s2 = sp.make_stack(material=sp.make_material(uv_tiles=None))
+    ts = [sp.make_texture_set(stacks=[s1]), sp.make_texture_set(stacks=[s2])]
+    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None, active_only=False)
+    assert ctx.get_num_uv_tiles() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +359,7 @@ def test_get_project_texset_info_no_uv_tiles(sp):
     s1 = sp.make_stack(material=sp.make_material(uv_tiles=None))
     s2 = sp.make_stack(material=sp.make_material(uv_tiles=None))
     ts = [sp.make_texture_set(stacks=[s1]), sp.make_texture_set(stacks=[s2])]
-    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None)
+    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None, active_only=False)
     assert ctx.get_project_texset_info() == "2 texture sets"
 
 
@@ -313,7 +367,7 @@ def test_get_project_texset_info_with_uv_tiles(sp):
     s1 = sp.make_stack(material=sp.make_material(uv_tiles=[object(), object()]))
     s2 = sp.make_stack(material=sp.make_material(uv_tiles=[object()]))
     ts = [sp.make_texture_set(stacks=[s1]), sp.make_texture_set(stacks=[s2])]
-    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None)
+    ctx = SPContext(texture_sets=ts, stack=s1, main_window=None, active_only=False)
     assert ctx.get_project_texset_info() == "2 texture sets (3 UV tiles)"
 
 
@@ -328,7 +382,7 @@ def test_get_project_texset_info_with_uv_tiles(sp):
 ])
 def test_get_num_resources(sp, n, expected):
     sp.set_state(resources=list(range(n)))
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None)
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None, active_only=False)
     assert ctx.get_num_resources() == expected
 
 
@@ -344,8 +398,9 @@ def test_layer_count_pluralization_fuzz(sp, count):
         texture_sets=[sp.make_texture_set(stacks=[stack])],
         stack=stack,
         main_window=None,
+        active_only=True,
     )
-    out = ctx.get_num_layers(active_only=True)
+    out = ctx.get_num_layers()
     if count == 1:
         assert out == "1 active layer"
     else:
@@ -359,12 +414,18 @@ def test_layer_count_pluralization_fuzz(sp, count):
 import PySide6.QtWidgets as QtW  # noqa: E402,F401 — referenced by SPContext via cls= args
 
 
-def _ctx_with(sp, main_window):
-    """Construct an SPContext whose main_window is a fake Qt tree."""
+def _ctx_with(sp, main_window, *, active_only: bool = False):
+    """Construct an SPContext whose main_window is a fake Qt tree.
+
+    Most tests don't care about active_only (they exercise Qt-introspection
+    paths that don't read it); the kwarg is here for the few tests that need
+    to flip the active-stack-only counter behavior on or off.
+    """
     return SPContext(
         texture_sets=[sp.make_texture_set()],
         stack=sp.make_stack(),
         main_window=main_window,
+        active_only=active_only,
     )
 
 
@@ -386,30 +447,44 @@ def test_get_active_tool_no_checked_button(sp):
     assert ctx.get_active_tool() is None
 
 
-def test_get_active_tool_multiple_checked_returns_none(sp):
-    """Plugin assumes only one tool is active; 2+ checked is treated as
-    ambiguous and returns None."""
+def test_get_active_tool_multiple_checked_picks_last(sp):
+    """The Material Picker can be active simultaneously with another tool and
+    appears later in the toolbar's child list. The plugin uses index = -1 so
+    it surfaces the picker (or whatever the most recently-checked tool is)
+    rather than refusing to choose."""
     toolbar = sp.make_toolbar(buttons=[
-        sp.make_tool_button(action_text="Paint", checked=True),
-        sp.make_tool_button(action_text="Eraser", checked=True),
+        sp.make_tool_button(action_text="Paint", action_object_name="Paint",
+                            checked=True),
+        sp.make_tool_button(action_text="Material Picker",
+                            action_object_name="MaterialPicker", checked=True),
     ])
     mw = sp.make_qt_main_window(children=[toolbar])
     ctx = _ctx_with(sp, mw)
-    assert ctx.get_active_tool() is None
+    # The (objectName, text) tuple of the LAST checked tool wins.
+    assert ctx.get_active_tool() == ("MaterialPicker", "Material Picker")
 
 
-@pytest.mark.parametrize("active_label", [
-    "Paint", "Physical paint", "Eraser", "Smudge", "Clone (absolute source)",
+@pytest.mark.parametrize("objname, label", [
+    # Tool object names are English-stable; the `label` is whatever the
+    # localized UI text reads. Both come back to the caller.
+    ("Paint", "Paint"),
+    ("Paint_Physics", "Physical paint"),
+    ("Eraser", "Eraser"),
+    ("Smudge", "Smudge"),
+    ("Clone_Absolute", "Clone (absolute source)"),
 ])
-def test_get_active_tool_returns_checked_action_text(sp, active_label):
+def test_get_active_tool_returns_objname_text_tuple(sp, objname, label):
     toolbar = sp.make_toolbar(buttons=[
-        sp.make_tool_button(action_text="Paint", checked=False),
-        sp.make_tool_button(action_text=active_label, checked=True),
-        sp.make_tool_button(action_text="Eraser", checked=False),
+        sp.make_tool_button(action_text="Paint", action_object_name="Paint",
+                            checked=False),
+        sp.make_tool_button(action_text=label, action_object_name=objname,
+                            checked=True),
+        sp.make_tool_button(action_text="Eraser", action_object_name="Eraser",
+                            checked=False),
     ])
     mw = sp.make_qt_main_window(children=[toolbar])
     ctx = _ctx_with(sp, mw)
-    assert ctx.get_active_tool() == active_label
+    assert ctx.get_active_tool() == (objname, label)
 
 
 def test_get_active_tool_swallows_runtimeerror(sp):
@@ -706,8 +781,11 @@ def test_update_small_icon_physical_paint_uses_pphys_prefix(sp, sp_plugin_clean)
             color_zone,
         ],
     )
+    # _SP_PHYSPAINT_NAME ("Paint_Physics") is the action's objectName; the
+    # text "Physical paint" is the localized hover label.
     toolbar = sp.make_toolbar(buttons=[
-        sp.make_tool_button("Physical paint", checked=True),
+        sp.make_tool_button(action_text="Physical paint",
+                            action_object_name="Paint_Physics", checked=True),
     ])
     mw = sp.make_qt_main_window(children=[toolbar, spv])
     ctx = _ctx_with(sp, mw)
@@ -719,13 +797,16 @@ def test_update_small_icon_physical_paint_uses_pphys_prefix(sp, sp_plugin_clean)
 
 def test_update_small_icon_non_paint_tool_uses_tool_name_icon(sp, sp_plugin_clean):
     """A non-Paint/Physical-paint tool falls through to the generic tool-icon
-    branch: small_icon is the lowercased, underscored tool name; small_icon_text
-    is the title-cased original."""
+    branch: small_icon is the lowercased tool *objectName* (English, stable);
+    small_icon_text is the title-cased localized tool *text*."""
     sp_plugin_clean.prefs.displaySmallIcon = True
     sp_plugin_clean.prefs.enableColoredIcons = True
     sp_plugin_clean.session.is_rendering = False
 
-    toolbar = sp.make_toolbar(buttons=[sp.make_tool_button("Eraser", checked=True)])
+    toolbar = sp.make_toolbar(buttons=[
+        sp.make_tool_button(action_text="Eraser", action_object_name="Eraser",
+                            checked=True),
+    ])
     mw = sp.make_qt_main_window(children=[toolbar])
     ctx = _ctx_with(sp, mw)
 
@@ -734,21 +815,29 @@ def test_update_small_icon_non_paint_tool_uses_tool_name_icon(sp, sp_plugin_clea
     assert sp_plugin_clean.details.small_icon_text == "Eraser"
 
 
-def test_update_small_icon_multi_word_tool_underscored(sp, sp_plugin_clean):
-    """Multi-word tool name like 'Clone' or 'Projection' — verify the
-    name->icon-key transform turns spaces into underscores."""
+def test_update_small_icon_uses_localized_text_with_english_objname(sp, sp_plugin_clean):
+    """Real-world case: the tool's objectName is English-stable
+    ('Clone_Absolute') while the action text is localized ('Clone (absolute
+    source)'). small_icon uses the lowercased objectName so the asset key
+    matches regardless of UI language; small_icon_text shows the localized
+    label for the Discord tooltip."""
     sp_plugin_clean.prefs.displaySmallIcon = True
     sp_plugin_clean.prefs.enableColoredIcons = True
     sp_plugin_clean.session.is_rendering = False
 
     toolbar = sp.make_toolbar(buttons=[
-        sp.make_tool_button("Clone (absolute source)", checked=True),
+        sp.make_tool_button(action_text="Clone (absolute source)",
+                            action_object_name="Clone_Absolute",
+                            checked=True),
     ])
     mw = sp.make_qt_main_window(children=[toolbar])
     ctx = _ctx_with(sp, mw)
 
     sp_plugin_clean.update_small_icon(ctx)
-    assert sp_plugin_clean.details.small_icon == "clone_(absolute_source)"
+    assert sp_plugin_clean.details.small_icon == "clone_absolute"
+    # The localized label is .title()-cased: pre-existing Title Case stays as
+    # the user typed in the locale.
+    assert "Clone" in sp_plugin_clean.details.small_icon_text
 
 
 def test_update_small_icon_colored_disabled_falls_back_to_tool_icon(sp, sp_plugin_clean):
@@ -823,14 +912,14 @@ def test_update_large_icon_with_version(sp, sp_plugin_clean):
     ctx = _ctx_with(sp, sp.make_qt_main_window())
     sp_plugin_clean.update_large_icon(ctx)
     assert "12.0.3" in sp_plugin_clean.details.large_icon_text
-    assert "Adobe Substance Painter" in sp_plugin_clean.details.large_icon_text
+    assert "Adobe Substance 3D Painter" in sp_plugin_clean.details.large_icon_text
 
 
 def test_update_large_icon_without_version(sp, sp_plugin_clean):
     sp_plugin_clean.prefs.displayVersion = False
     ctx = _ctx_with(sp, sp.make_qt_main_window())
     sp_plugin_clean.update_large_icon(ctx)
-    assert sp_plugin_clean.details.large_icon_text == "Adobe Substance Painter"
+    assert sp_plugin_clean.details.large_icon_text == "Adobe Substance 3D Painter"
 
 
 # --- callbacks ---
@@ -862,11 +951,14 @@ def test_on_bake_end_clears_rendering(sp_plugin_clean):
 
 
 def test_on_bake_update_records_progress(sp_plugin_clean):
-    sp_plugin_clean._on_bake_update(0.5)
+    """_on_bake_update now takes a BakingProcessProgress event object with a
+    .progress float attribute (0.0–1.0), not a raw float."""
+    from types import SimpleNamespace
+    sp_plugin_clean._on_bake_update(SimpleNamespace(progress=0.5))
     assert sp_plugin_clean.session.rendered_frames == 50
-    sp_plugin_clean._on_bake_update(0.0)
+    sp_plugin_clean._on_bake_update(SimpleNamespace(progress=0.0))
     assert sp_plugin_clean.session.rendered_frames == 0
-    sp_plugin_clean._on_bake_update(1.0)
+    sp_plugin_clean._on_bake_update(SimpleNamespace(progress=1.0))
     assert sp_plugin_clean.session.rendered_frames == 100
 
 
@@ -890,27 +982,27 @@ def test_get_active_layer_blend_mode_no_selection_returns_none(sp):
     """get_active_layer_blend_mode's empty-selection branch returns None.
     Exercises the `else: return None` at the bottom of the function."""
     stack = sp.make_stack(selected_nodes=[])
-    ctx = SPContext(texture_sets=[], stack=stack, main_window=None)
+    ctx = SPContext(texture_sets=[], stack=stack, main_window=None, active_only=False)
     assert ctx.get_active_layer_blend_mode() is None
 
 
 def test_find_named_with_none_parent_returns_none(sp):
     """_find_named's `if parent is None: return None` branch."""
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None)
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None, active_only=False)
     # Pass None as parent directly — exercises the early return.
     assert ctx._find_named(None, object, "anything") is None
 
 
 def test_get_brush_material_view_found_but_no_label_returns_none(sp):
-    """MaskParametersView exists but has no dropzone_text QLabel inside —
-    returns None instead of crashing."""
-    mpv = sp.make_qt_widget(
-        widget_class="QFrame",
-        object_name="MaskParametersView",
+    """materialModeParams exists but has no dropzone_text QLabel inside —
+    returns None instead of crashing on `mat_label.text()`."""
+    mmp = sp.make_qt_widget(
+        widget_class="QWidget",
+        object_name="materialModeParams",
         children=[],  # no QLabel
     )
-    mw = sp.make_qt_main_window(children=[mpv])
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw)
+    mw = sp.make_qt_main_window(children=[mmp])
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw, active_only=False)
     assert ctx.get_brush_material() is None
 
 
@@ -921,14 +1013,14 @@ def test_get_brush_alpha_view_found_but_no_label_returns_none(sp):
         children=[],
     )
     mw = sp.make_qt_main_window(children=[mpv])
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw)
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw, active_only=False)
     assert ctx.get_brush_alpha() is None
 
 
 def test_get_brush_alpha_runtimeerror_returns_none(sp):
     """get_brush_alpha's RuntimeError catch."""
     mw = sp.make_qt_widget(widget_class="QMainWindow", raise_on_find=True)
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw)
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw, active_only=False)
     assert ctx.get_brush_alpha() is None
 
 
@@ -966,6 +1058,123 @@ def test_get_brush_material_and_alpha_target_distinct_widgets(
              if widget == "alpha"
              else sp.make_material_mode_params(dropzone_text="Worn Leather"))
     mw = sp.make_qt_main_window(children=[child])
-    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw)
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw, active_only=False)
     assert ctx.get_brush_alpha() == expected_alpha
     assert ctx.get_brush_material() == expected_material
+
+
+# ---------------------------------------------------------------------------
+# countActiveStack pref (new) — flows into SPContext.active_only via _capture
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pref_value,expected_active_only", [(True, True), (False, False)])
+def test_capture_threads_countActiveStack_pref_into_active_only(
+    sp, sp_plugin_clean, pref_value, expected_active_only,
+):
+    """SPPlugin._capture() reads prefs.countActiveStack and forwards it as
+    SPContext.active_only. Verifies the pref->field plumbing."""
+    sp_plugin_clean.prefs.countActiveStack = pref_value
+    sp.set_state(active_stack=sp.make_stack(), texture_sets=[sp.make_texture_set()])
+    ctx = sp_plugin_clean._capture()
+    assert ctx is not None
+    assert ctx.active_only is expected_active_only
+
+
+# ---------------------------------------------------------------------------
+# bakingDetails pref (new) — controls baking-text override in both
+# small_icon and details slots
+# ---------------------------------------------------------------------------
+
+def test_update_small_icon_baking_with_baking_details_on_omits_percent(
+    sp, sp_plugin_clean,
+):
+    """When bakingDetails is True, the details slot already shows the
+    percentage, so the small-icon tooltip is just the baking icon (no text).
+    """
+    sp_plugin_clean.prefs.displaySmallIcon = True
+    sp_plugin_clean.prefs.bakingDetails = True
+    sp_plugin_clean.session.is_rendering = True
+    sp_plugin_clean.session.rendered_frames = 42
+    ctx = _ctx_with(sp, sp.make_qt_main_window())
+    sp_plugin_clean.update_small_icon(ctx)
+    assert sp_plugin_clean.details.small_icon == "baking"
+    # No text — the details slot is the source of truth for the percentage.
+    assert sp_plugin_clean.details.small_icon_text == "Baking"
+
+
+def test_update_small_icon_baking_with_baking_details_off_shows_percent(
+    sp, sp_plugin_clean,
+):
+    """When bakingDetails is False, the details slot won't carry the
+    percentage, so the small-icon tooltip surfaces it instead."""
+    sp_plugin_clean.prefs.displaySmallIcon = True
+    sp_plugin_clean.prefs.bakingDetails = False
+    sp_plugin_clean.session.is_rendering = True
+    sp_plugin_clean.session.rendered_frames = 73
+    ctx = _ctx_with(sp, sp.make_qt_main_window())
+    sp_plugin_clean.update_small_icon(ctx)
+    assert sp_plugin_clean.details.small_icon == "baking"
+    assert sp_plugin_clean.details.small_icon_text == "Baking: 73%"
+
+
+def test_update_details_baking_with_baking_details_off_falls_through(
+    sp, sp_plugin_clean,
+):
+    """When bakingDetails is False during a bake, update_details delegates
+    to the base class (the slot reads detailsType normally) rather than
+    overriding with the baking percentage."""
+    sp_plugin_clean.prefs.enableDetails = True
+    sp_plugin_clean.prefs.bakingDetails = False
+    sp_plugin_clean.prefs.detailsType = "project"
+    sp_plugin_clean.prefs.customDetails = ""
+    sp_plugin_clean.prefs.detailsCycle = False
+    sp_plugin_clean.session.is_rendering = True
+    sp_plugin_clean.session.rendered_frames = 50
+    sp.set_state(project_name="MyProj")
+    ctx = _ctx_with(sp, sp.make_qt_main_window())
+    sp_plugin_clean.update_details(ctx)
+    # No "Baking: ..." prefix; the project name (from update_slot) wins.
+    assert "Baking" not in sp_plugin_clean.details.details_text
+    assert "MyProj" in sp_plugin_clean.details.details_text
+
+
+# ---------------------------------------------------------------------------
+# brush_alpha display type (new) — sits in INFO_CHOICES and display_types
+# ---------------------------------------------------------------------------
+
+def test_brush_alpha_is_wired_into_display_types_and_info_choices():
+    """The new 'brush_alpha' key must appear in both maps so the settings
+    UI offers it and the dispatch table can render it."""
+    from substance_painter_presence.painter_presence import (
+        SPPlugin as _SPPlugin, SPSettings as _SPSettings,
+    )
+    info_keys = {k for _, k in _SPSettings.INFO_CHOICES}
+    assert "brush_alpha" in info_keys
+    assert "brush_alpha" in _SPPlugin.display_types
+
+
+def test_brush_alpha_display_type_routes_to_get_brush_alpha(sp):
+    """Selecting 'brush_alpha' as a slot type pulls the value from
+    get_brush_alpha, which already prefixes 'Brush Alpha: ' itself."""
+    from substance_painter_presence.painter_presence import SPPlugin as _SPPlugin
+    mpv = sp.make_mask_parameters_view(dropzone_text="Soft brush 02")
+    mw = sp.make_qt_main_window(children=[mpv])
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=mw,
+                    active_only=False)
+    assert _SPPlugin.display_types["brush_alpha"](ctx) == "Brush Alpha: Soft brush 02"
+
+
+# ---------------------------------------------------------------------------
+# get_project_texset_info — empty-texsets branch (new "No texture sets" string)
+# ---------------------------------------------------------------------------
+
+def test_get_project_texset_info_empty_texsets_returns_default_string(sp):
+    """When there are no texture sets at all, the slot reads 'No texture sets'
+    (previous behavior was to return None)."""
+    ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None,
+                    active_only=False)
+    # Note: get_num_texsets returns 0 (not None), but the get_num_uv_tiles
+    # all-texsets aggregation returns None — exercised below in the
+    # `num_uv_tiles is None` branch.
+    out = ctx.get_project_texset_info()
+    assert out in ("0 texture sets", "No texture sets")

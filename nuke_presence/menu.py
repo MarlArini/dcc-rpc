@@ -10,24 +10,34 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 from typing import Tuple, ClassVar, List, Dict, Any
 from PySide6 import QtWidgets as QtW
 from pypresence.presence import Presence
 
-# pylint: disable=import-error
-import nuke  # pyright: ignore[reportMissingImports]
+import nuke  # pyright: ignore[reportMissingImports] pylint: disable=import-error
 
-# pylint: enable=import-error
-from common import SharedSettings, SessionInfo, RPCUpdateDetails, JSONSharedSettings
 from common import (
+    SharedSettings,
+    RenderSettings,
+    SessionInfo,
+    RPCUpdateDetails,
+    JSONSharedSettings,
+    QtSettingsGUIMenu,
+    on_render_start,
     on_render_end,
     on_frame_render_end,
     get_file_size_str,
     force_clear_on_exit,
     plural as nk_plural,
+    push_rpc_update,
+    update_buttons,
+    connect_rpc,
+    advance_cycle,
+    update_slot,
+    format_render_details,
+    DISCORD_SHORT_TERM_RATE_LIMIT
 )
-from common import push_rpc_update, update_buttons, on_render_start, connect_rpc
-from common import advance_cycle, update_slot, QtSettingsGUIMenu
 
 # Bootstrap: ensure this plugin's directory is on sys.path so the sibling
 # common.py and pypresence/ resolve when loaded by the host application.
@@ -63,6 +73,10 @@ class NKSettings(SharedSettings, JSONSharedSettings):
     displayRenderStats: bool = field(
         default=True,
         metadata={"group": "Details", "label": "Display render stats in details"},
+    )
+    displayFileName: bool = field(
+        default=True,
+        metadata={"group": "General", "label": "Display file name when rendering"},
     )
     displayFrames: bool = field(
         default=True,
@@ -310,25 +324,25 @@ NK_DISPLAY_TYPES = {
 # since it happens through an execute dialog/function which doesn't get hooked
 # This is just an approximation.
 def nk_update_presence_details(ctx):
+    NK_UPDATE_DETAILS.details_text = ""
     # Rendering Details
     if NK_PREFS.enableDetails and NK_SESSION.is_rendering:
         fname = ctx.get_comp_name()
         frame_range = ctx.get_frame_range()
-        NK_UPDATE_DETAILS.details_text = (
-            f"Rendering {fname}"
-            + (": " if (NK_PREFS.displayFrames and frame_range[1]) else "")
-            + (
-                f"Frame {frame_range[0]} of {frame_range[1]}"
-                if NK_PREFS.displayFrames and frame_range[1]
-                else ""
-            )
+        NK_UPDATE_DETAILS.details_text = format_render_details(
+            file_name=fname,
+            rendered_frames=frame_range[0],
+            total_frames=frame_range[1],
+            prefs=RenderSettings(
+                displayRenderStats=NK_PREFS.displayRenderStats,
+                displayFileName=NK_PREFS.displayFileName,
+                displayFrames=NK_PREFS.displayFrames,
+            ),
         )
     elif NK_PREFS.enableDetails:
         update_slot(
             ctx, "details", NK_PREFS, NK_UPDATE_DETAILS, NK_DISPLAY_TYPES, NK_SESSION
         )
-    else:
-        NK_UPDATE_DETAILS.details_text = ""
 
 
 def nk_update_presence():
@@ -355,6 +369,9 @@ def nk_update_presence():
             nuke.warning(f"[NukePresence] clear failed: {e}")
             NK_SESSION.connected = False
 
+def nk_on_setting_change():
+    if time.time() - NK_SESSION.last_update > DISCORD_SHORT_TERM_RATE_LIMIT:
+        nk_update_presence()
 
 #############
 # Threading #
@@ -410,7 +427,7 @@ def nk_uninstall_render_callbacks():
 
 class NukeSettingsWindow(QtSettingsGUIMenu):
     def __init__(self, parent=None):
-        super().__init__(NK_PREFS, nk_update_presence, "Nuke", parent)
+        super().__init__(NK_PREFS, nk_on_setting_change, "Nuke", parent)
 
 
 def nk_open_settings():
@@ -474,8 +491,7 @@ NK_WORKER = NKBackgroundWorker()
 NK_PREFS.setup_persistence(
     path=os.path.join(os.path.expanduser("~/.nuke"), "nuke_presence_preferences.json"),
     app_name="nuke",
-    warn=nuke.warning,
-    refresh_func=nk_update_presence,
+    warn=nuke.warning
 )
 NK_MENU = NKMenu(NK_PREFS, NK_WORKER)
 NK_WORKER.start()

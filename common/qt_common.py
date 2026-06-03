@@ -1,440 +1,53 @@
-"""
-Common functionality for all application plugins related to rich presence updates,
-render callbacks, and GUI construction.
+"""Qt-specific classes for applications using PyQt/PySide"""
 
-This module is split into two sections:
-
-  1. Host-agnostic utilities + dataclasses — always available; no Qt binding 
-  requirements
-
-  2. Qt-bound classes: `QtSettingsGUIMenu`, `JSONSharedSettings`, `RPCTimer`, 
-  and `RPCBasePlugin`. Hosts with no Qt binding get `None` for these names.
-
-`QT_BINDING` exposes the string name of the detected binding ("PySide6", "PyQt5",
-"PySide2", or None).
-"""
-
-from __future__ import annotations
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, fields, Field
+import importlib
 import json
 import os
-import re
 import time
-from typing import List, Dict, Any, ClassVar, Callable, get_type_hints
-from dataclasses import dataclass, field, fields, Field
-from abc import abstractmethod, ABC
+from typing import Any, Callable, ClassVar, Dict, get_type_hints, TYPE_CHECKING
+
 from pypresence.presence import Presence
-from pypresence import exceptions
 
-# Qt binding detection
-QtCore: Any = None
-QtWidgets: Any = None
-QT_BINDING: str | None = None
-for _binding in ("PySide6", "PyQt5", "PySide2"):
-    try:
-        _qt_core = __import__(f"{_binding}.QtCore", fromlist=["QtCore"])
-        _qt_widgets = __import__(f"{_binding}.QtWidgets", fromlist=["QtWidgets"])
-    except ImportError:
-        continue
-    QtCore = _qt_core
-    QtWidgets = _qt_widgets
-    QT_BINDING = _binding
-    break
+from .util_classes import SessionInfo, RPCUpdateDetails
+from .rpc_util import (
+    connect_rpc,
+    push_rpc_update,
+    update_buttons,
+    advance_cycle,
+    update_slot,
+    DISCORD_SHORT_TERM_RATE_LIMIT,
+)
 
-
-# ===========================================================================
-# Host-agnostic utilities
-# ===========================================================================
-
-
-def plural(count: int, prefix: str, postfix: str = "s") -> str:
-    if count == 1:
-        return f"{count} {prefix}"
-    return f"{count} {prefix}{postfix}"
-
-
-def is_url(s: str) -> bool:
-    """Evaluate a string and return True if it is a valid URL (may miss some edge cases)"""
-    regex = re.compile(
-        r"^https?://"  # http:// or https://
-        r"(?:[a-zA-Z0-9-]+\.)+"  # subdomain(s)
-        r"[a-zA-Z]{2,}"  # top-level domain
-        r"(?:\:\d{1,5})?"  # optional port
-        r"(?:/[^\s]*)?$",  # optional path
-        re.IGNORECASE,
-    )
-    return regex.match(s) is not None
-
-
-def pad_text(s: str) -> str:
-    """
-    If the user string is more than one character, return it. Else,
-    return a length-2 empty string to satisfy Discord's requirement.
-    """
-    s = str(s)
-    return s if len(s) > 1 else "  "
-
-
-def shorten_number(n: int) -> str:
-    if n < 1_000:
-        return str(n)
-    elif n < 1_000_000:
-        return f"{n // 1_000}k"
-    elif n < 1_000_000_000:
-        return f"{n // 1_000_000}m"
-    else:
-        return f"{n // 1_000_000_000}b"
-
-
-def get_file_size_str(b: float) -> str:
-    """
-    Convert bytes to a readable string. Taken directly from
-    https://github.com/abrasic/blendpresence
-    """
-    for u in [" bytes", " KB", " MB", " GB", " TB"]:
-        if b < 1024.0 or u == " PB":
-            break
-        b /= 1024.0
-    return f"{b:.2f} {u}"
-
-
-class RPCUpdateDetails:
-    """Class to hold data for each parameter of the RPC update"""
-
-    def __init__(self, app_icon_name):
-        self.start_time: float = time.time()
-        self.state_text: str = ""
-        self.details_text: str = ""
-        self.small_icon: str | None = None
-        self.small_icon_text: str = ""
-        self.large_icon: str = app_icon_name
-        self.large_icon_text: str = ""
-        self.buttons: List[Dict] = []
-
-
-class SessionInfo:
-    start_time: float = time.time()
-    connected: bool = False
-    is_rendering: bool = False
-    rendered_frames: int = 0
-    cycle_iter: int = 0
-
-
-def rpc_update(details, client, enable_time):
-    """Send an update to the RPC client. May raise exceptions which must be handled."""
-    client.update(
-        start=details.start_time if enable_time else None,
-        state=details.state_text,
-        details=details.details_text if details.details_text else "  ",
-        small_image=details.small_icon,
-        small_text=details.small_icon_text if details.small_icon_text else None,
-        large_image=details.large_icon,
-        large_text=details.large_icon_text if details.large_icon_text else None,
-        buttons=details.buttons if details.buttons else None,
-    )
-
-
-def force_clear_on_exit(client):
-    try:
-        client.clear()
-        client.close()
-    except BaseException:
-        pass
-
-
-def update_buttons(details, prefs):
-    """Check validity of user buttons, if enabled, and update the RPC details."""
-    details.buttons = []
-    if is_url(prefs.button1Url) and prefs.button1Label and prefs.enableButton1:
-        details.buttons.append({"label": prefs.button1Label, "url": prefs.button1Url})
-    if is_url(prefs.button2Url) and prefs.button2Label and prefs.enableButton2:
-        details.buttons.append({"label": prefs.button2Label, "url": prefs.button2Url})
-
-
-def on_render_start(info: SessionInfo, prefs):
-    info.is_rendering = True
-    if prefs.resetTimer:
-        info.start_time = time.time()
-
-
-def on_render_end(info: SessionInfo, prefs):
-    info.is_rendering = False
-    info.rendered_frames = 0
-    if prefs.resetTimer:
-        info.start_time = time.time()
-
-
-def on_frame_render_end(info: SessionInfo):
-    info.rendered_frames += 1
-
-
-def connect_rpc(client: Presence, app_name: str, error: Callable = print):
-    try:
-        client.connect()
-        return True
-    except Exception as e:
-        error(f"[{app_name.capitalize()}Presence] Connection Error: {e}")
-        return False
-
-
-def push_rpc_update(
-    session: SessionInfo,
-    details: RPCUpdateDetails,
-    prefs: SharedSettings,
-    client: Presence,
-    app_name: str,
-    error: Callable = print,
-):
-    if session.connected:
+if TYPE_CHECKING:
+    from PySide6 import QtWidgets, QtCore
+else:
+    QtCore: Any = None
+    QtWidgets: Any = None
+    QT_BINDING: str | None = None
+    for _binding in ("PySide6", "PyQt5", "PySide2"):
         try:
-            rpc_update(details, client, prefs.enableTime)
-        except (
-            exceptions.InvalidID,
-            AssertionError,
-            exceptions.PipeClosed,
-            exceptions.DiscordNotFound,
-        ) as e:
-            session.connected = False
-            error(f"[{app_name.capitalize()}Presence] RPC Connection Lost: {e}")
-            session.connected = connect_rpc(client, app_name, error)
-        except exceptions.ServerError as e:
-            error(f"[{app_name.capitalize()}Presence] ServerError: {e}")
-    else:
-        error(f"[{app_name.capitalize()}Presence] Retrying...")
-        session.connected = connect_rpc(client, app_name, error)
-
-
-def advance_cycle(session: SessionInfo, display_types: Dict):
-    session.cycle_iter += 1
-    session.cycle_iter = session.cycle_iter % len(display_types)
-
-
-_SLOT_PEER = {"state": "details", "details": "state"}
-_SLOT_OFFSET = {"state": 0, "details": 1}
-
-
-def update_slot(
-    ctx,
-    slot: str,
-    prefs: SharedSettings,
-    details: RPCUpdateDetails,
-    display_types: Dict[str, Callable],
-    session: SessionInfo,
-) -> None:
-    peer = _SLOT_PEER[slot]
-    text_attr = f"{slot}_text"
-    setattr(details, text_attr, "")
-
-    if not getattr(prefs, f"enable{slot.capitalize()}"):
-        return
-    custom = getattr(prefs, f"custom{slot.capitalize()}")
-    if custom:
-        setattr(details, text_attr, pad_text(custom))
-        return
-
-    cycling = getattr(prefs, f"{slot}Cycle")
-    peer_cycling = getattr(prefs, f"{peer}Cycle")
-    peer_fixed = getattr(prefs, f"{peer}Type")
-    fixed = getattr(prefs, f"{slot}Type")
-
-    if cycling:
-        text = pick_cycling(
-            ctx, peer_cycling, peer_fixed, _SLOT_OFFSET[slot], display_types, session
-        )
-    else:
-        text = pick_fixed(ctx, fixed, display_types)
-
-    text = pad_text(text)
-    setattr(details, text_attr, text)
-
-
-def pick_fixed(ctx, kind: str, display_types: Dict[str, Callable]) -> str:
-    fn = display_types.get(kind)
-    if fn is None:
-        return ""
-    value = fn(ctx)
-    return str(value) if value not in (None, "") else ""
-
-
-def pick_cycling(
-    ctx,
-    peer_cycling: bool,
-    peer_fixed: str,
-    offset: int,
-    display_types: Dict[str, Callable],
-    session: SessionInfo,
-) -> str:
-    display_cycle = list(display_types)
-    n = len(display_cycle)
-    start = (session.cycle_iter + offset) % n
-    # Skip the slot occupied by a fixed peer.
-    if not peer_cycling:
-        skip = peer_fixed
-    else:
-        skip = None
-    for i in range(n):
-        idx = (start + i) % n
-        kind = display_cycle[idx]
-        if kind == skip:
+            _qt_core = importlib.import_module(f"{_binding}.QtCore")
+            _qt_widgets = importlib.import_module(f"{_binding}.QtWidgets")
+        except ImportError:
             continue
-        value = display_types[kind](ctx)
-        if value not in (None, ""):
-            return str(value)
-    return ""  # nothing meaningful in the entire cycle
-
-
-@dataclass
-class SharedSettings(ABC):
-    """
-    Base class for user settings for all plugins. Fields with metadata allow dynamic
-    construction of the settings GUI for each application. Specific applications should
-    inherit from this to implement settings persistence across sessions and to add
-    additional fields.
-    """
-
-    # pylint: disable=invalid-name
-    generalEnable: bool = field(
-        default=True, metadata={"group": "General", "label": "Enable RPC Updates"}
-    )
-    generalUpdate: int = field(
-        default=12,
-        metadata={
-            "group": "General",
-            "label": "Update interval",
-            "min": 12,
-            "max": 60,
-            "suffix": "s",
-        },
-    )
-    enableTime: bool = field(
-        default=True, metadata={"group": "General", "label": "Show elapsed time"}
-    )
-    resetTimer: bool = field(
-        default=True,
-        metadata={"group": "General", "label": "Reset timer when a new file is opened"},
-    )
-    displayVersion: bool = field(
-        default=True,
-        metadata={
-            "group": "Icons",
-            "label": "Display application version on large icon hover",
-        },
-    )
-    displaySmallIcon: bool = field(
-        default=True,
-        metadata={
-            "group": "Icons",
-            "label": "Display a small icon for specific contexts",
-        },
-    )
-    enableDetails: bool = field(
-        default=True,
-        metadata={
-            "group": "Details",
-            "label": "Enable details field",
-            "group_master": True,
-        },
-    )
-    detailsType: str = field(
-        default="scene",
-        metadata={
-            "group": "Details",
-            "label": "Detail type to display",
-            "widget": "combobox",
-            "choices_attr": "INFO_CHOICES",
-        },
-    )
-    customDetails: str = field(
-        default="",
-        metadata={"group": "Details", "label": "Custom text for details field"},
-    )
-    detailsCycle: bool = field(
-        default=False, metadata={"group": "Details", "label": "Cycle displayed details"}
-    )
-    enableState: bool = field(
-        default=True,
-        metadata={
-            "group": "State",
-            "label": "Enable state field",
-            "group_master": True,
-        },
-    )
-    stateType: str = field(
-        default="scene",
-        metadata={
-            "group": "State",
-            "label": "State type to display",
-            "widget": "combobox",
-            "choices_attr": "INFO_CHOICES",
-        },
-    )
-    customState: str = field(
-        default="", metadata={"group": "State", "label": "Custom text for state field"}
-    )
-    stateCycle: bool = field(
-        default=False, metadata={"group": "State", "label": "Cycle displayed state"}
-    )
-    enableButton1: bool = field(
-        default=False,
-        metadata={
-            "group": "Buttons",
-            "label": "Enable Button 1",
-            "controls": ["button1Label", "button1Url"],
-        },
-    )
-    button1Label: str = field(
-        default="", metadata={"group": "Buttons", "label": "Custom label for button 1"}
-    )
-    button1Url: str = field(
-        default="", metadata={"group": "Buttons", "label": "URL for button 1"}
-    )
-    enableButton2: bool = field(
-        default=False,
-        metadata={
-            "group": "Buttons",
-            "label": "Enable Button 2",
-            "controls": ["button2Label", "button2Url"],
-        },
-    )
-    button2Label: str = field(
-        default="", metadata={"group": "Buttons", "label": "Custom label for button 2"}
-    )
-    button2Url: str = field(
-        default="", metadata={"group": "Buttons", "label": "URL for button 2"}
-    )
-    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {}
-
-    def __post_init__(self):
-        for k, v in self._INITIAL_DEFAULTS.items():
-            self.__setattr__(k, v)
-
-
-@dataclass
-class ColoredIconSettings:
-    # pylint: disable=invalid-name
-    enableColoredIcons: bool = field(
-        default=True,
-        metadata={"group": "Icons", "label": "Use colored icons (when supported)"},
-    )
-    useEvocativeNames: bool = field(
-        default=True,
-        metadata={
-            "group": "Icons",
-            "label": ("Use vibrant color names in small icon text"),
-        },
-    )
-
-
-# ===========================================================================
-# Qt-bound classes
-# ===========================================================================
+        QtCore = _qt_core
+        QtWidgets = _qt_widgets
+        QT_BINDING = _binding
+        break
 
 if QtCore is not None:
 
     class QtSettingsGUIMenu(QtWidgets.QDialog):
+        """Class to construct a floating dialog window for application preferences
+        by dynamically building a form from the dataclass fields of the settings.
+        """
+
         def __init__(self, prefs, refresh_func, app_name, parent=None):
             super(QtSettingsGUIMenu, self).__init__(parent=parent)
             self.setObjectName(f"{app_name}PresenceSettingsDialog")
-            self.setWindowTitle(f"{app_name} Presence — Settings")
+            self.setWindowTitle(f"{app_name}Presence — Settings")
             self.setWindowFlags(
                 self.windowFlags() & ~QtCore.Qt.WindowType.WindowContextHelpButtonHint
             )
@@ -536,7 +149,9 @@ if QtCore is not None:
                 if "group_master" in f.metadata:
                     f_group_name = f.metadata["group"]
                     subitems = [
-                        f_.name for f_ in self._groups[f_group_name] if f_.name != f.name
+                        f_.name
+                        for f_ in self._groups[f_group_name]
+                        if f_.name != f.name
                     ]
                     controllers[f.name] = subitems
                 elif "controls" in f.metadata:
@@ -625,28 +240,24 @@ if QtCore is not None:
                 for controlled_item_name in controlled_items:
                     self._gui_widgets[controlled_item_name].setEnabled(enabled)
 
-
     @dataclass
     class JSONSharedSettings:
-        """JSON-backed settings with debounced writes via a QTimer.
+        """JSON-backed settings with debounced writes via a QTimer, to avoid
+        dumping changes to disk as the user types text or increments a spinbox.
 
         Qt-bound: the debounce uses `QtCore.QTimer`. Hosts without a Qt binding
         should not use this class — they need to wire persistence to their own
-        host scheduler (GIMP: GLib.timeout_add; C4D: BaseContainer + custom
-        write hook). The GIMP plug-in does its own JSON I/O via the settings
-        dialog procedure and intentionally does NOT inherit from this class.
+        host scheduler.
         """
-        __dataclass_fields__: ClassVar[dict[str, Any]]
+
         _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]]
         _path: str = ""
         _warn: Callable[[str], None] = print
         _timer: QtCore.QTimer | None = None
         _loaded: bool = False
         _app_name: str = ""
-        _refresh_func: Callable | None = None
-        _prev_interval: int | None = None
 
-        def setup_persistence(self, path, app_name, warn=print, refresh_func = None):
+        def setup_persistence(self, path, app_name, warn=print):
             self._path = path
             self._app_name = app_name
             self._warn = warn
@@ -654,10 +265,11 @@ if QtCore is not None:
             self._timer.timeout.connect(self._write)
             self._load()
             self._loaded = True
-            self._prev_interval = getattr(self, 'generalUpdate', None)
-            self._refresh_func = refresh_func
 
         def _load_warn(self, key="", default: Any = None):
+            """If no key is provided, warns the user that all settings failed and will be
+            defaulted; if a key and default are provided, warns the user that the setting
+            for that key failed to load and `default` will be used as the value."""
             if not key:
                 self._warn(
                     f"[{self._app_name.capitalize()}Presence] Error loading preferences: "
@@ -695,11 +307,6 @@ if QtCore is not None:
                     self._load_warn(f.name, self._get_default(f))
 
         def _write(self, *_):
-            if ( # Debounce interval changes to not spam Discord with rpc updates
-                update := getattr(self, 'generalUpdate', None)
-            ) != self._prev_interval and self._refresh_func is not None:
-                self._prev_interval = update
-                self._refresh_func()
             try:
                 with open(self._path, "w", encoding="utf-8") as prefs_fp:
                     json.dump(
@@ -739,7 +346,6 @@ if QtCore is not None:
                 if not f.name.startswith("_"):
                     setattr(self, f.name, self._get_default(f))
 
-
     class RPCTimer(QtCore.QObject):
         def __init__(self, prefs, update_presence_func):
             super().__init__()
@@ -757,8 +363,12 @@ if QtCore is not None:
             if self._timer.isActive():
                 self._timer.setInterval(self._prefs.generalUpdate * 1000)
 
-
     class RPCBasePlugin(ABC):
+        """Base class for RPC plugins in a Qt-bound application, using a QTimer to
+        handle the event loop. Inheritors must implement their own context capture
+        method, start/stop methods for the plugin, and methods for updating the
+        large and small icons, since all of those depend on the application API."""
+
         display_types: ClassVar[Dict[str, Callable]] = {}
 
         def __init__(self, app_id, app_name, prefs_class, warn, error, path=""):
@@ -771,12 +381,13 @@ if QtCore is not None:
             self.timer = RPCTimer(self.prefs, self.update_presence)
             if isinstance(self.prefs, JSONSharedSettings):
                 if not path:
-                    raise ValueError("RPCBasePlugin with JSONSharedSettings needs a path")
+                    raise ValueError(
+                        "RPCBasePlugin with JSONSharedSettings needs a path"
+                    )
                 self.prefs.setup_persistence(
                     path=os.path.join(path, f"{app_name}_presence_settings.json"),
                     app_name=app_name,
                     warn=warn,
-                    refresh_func=self.update_presence
                 )
             self.menubar_item: QtWidgets.QMenu | None = None
             self.reset_callback: int | None = None
@@ -801,28 +412,28 @@ if QtCore is not None:
             advance_cycle(self.session, self.display_types)
 
         @abstractmethod
-        def _capture(self) -> Any | None:
-            ... # pragma: no cover
+        def _capture(self) -> Any | None: ...  # pragma: no cover
 
         @abstractmethod
-        def start(self):
-            ... # pragma: no cover
+        def start(self): ...  # pragma: no cover
 
         @abstractmethod
-        def close(self):
-            ... # pragma: no cover
+        def close(self): ...  # pragma: no cover
 
         @abstractmethod
-        def update_small_icon(self, ctx):
-            ... # pragma: no cover
+        def update_small_icon(self, ctx): ...  # pragma: no cover
 
         @abstractmethod
-        def update_large_icon(self, ctx):
-            ... # pragma: no cover
+        def update_large_icon(self, ctx): ...  # pragma: no cover
 
         def update_details(self, ctx):
             update_slot(
-                ctx, "details", self.prefs, self.details, self.display_types, self.session
+                ctx,
+                "details",
+                self.prefs,
+                self.details,
+                self.display_types,
+                self.session,
             )
 
         def update_state(self, ctx):
@@ -837,11 +448,13 @@ if QtCore is not None:
                         self.rpc_client.clear()
                     except Exception as e:  # noqa: BLE001
                         self._error(
-                            f"[{self._app_name.capitalize()}Presence] "
-                            f"clear failed: {e}"
+                            f"[{self._app_name.capitalize()}Presence] clear failed: {e}"
                         )
                         self.session.connected = False
                 return
+
+            # sessionInfo only updates when resetTimer is enabled, so here we can just copy
+            self.details.start_time = self.session.start_time
 
             ctx = self._capture()
             if ctx is None:
@@ -862,6 +475,22 @@ if QtCore is not None:
             self.update_details(ctx)
             update_buttons(self.details, self.prefs)
             self.push_rpc_update()
+
+        def on_settings_change(self):
+            """Method passed to QtSettingsGUIMenu to invoke when the user changes their settings.
+            If not enough time has elapsed to send an update, we just set the new interval on the
+            QTimer. If enough time has elapsed, reset the timer and push an immediate RPC update."""
+            if time.time() - self.session.last_update > DISCORD_SHORT_TERM_RATE_LIMIT:
+                self.update_presence()
+            self.timer.refresh()
+
+        def make_qt_window(self, app_name, parent):
+            self.settings_window = QtSettingsGUIMenu(
+                prefs=self.prefs,
+                refresh_func=self.on_settings_change,
+                app_name=app_name,
+                parent=parent,
+            )
 
 else:
     # Stub assignments so `from common import RPCBasePlugin` still resolves on

@@ -4,13 +4,13 @@ DesignerPresence has been tested on Substance Designer 16.0.1 (Windows 11).
 For more info, see https://github.com/MarlArini/dcc-rpc.
 """
 
-from __future__ import annotations
-import time
-import logging
 import atexit
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
-from typing import ClassVar, List, Tuple, cast, Dict, Callable, Any
+import time
+from typing import Any, Callable, ClassVar, Dict, List, Tuple, cast
+
 import PySide6.QtGui as QtG
 
 # pylint: disable=import-error
@@ -19,11 +19,15 @@ import sd.api
 import sd.api.qtforpythonuimgrwrapper
 import sd.api.sbs.sdsbscompgraph
 import sd.api.sdbasetypes
-
 # pylint: enable=import-error
-from common import SharedSettings as SPSharedSettings, force_clear_on_exit
-from common import QtSettingsGUIMenu, JSONSharedSettings, RPCBasePlugin
-from common import plural as sp_plural
+
+from common import (
+    SharedSettings,
+    JSONSharedSettings,
+    RPCBasePlugin,
+    force_clear_on_exit,
+    plural as sp_plural,
+)
 
 ############
 # Settings #
@@ -31,7 +35,8 @@ from common import plural as sp_plural
 
 
 @dataclass
-class SPSettings(SPSharedSettings, JSONSharedSettings):
+class SPSettings(SharedSettings, JSONSharedSettings):
+    # pylint: disable=invalid-name
     _PREFIX: ClassVar[str] = "designerPresence_"
     INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
         ("Package name", "package"),
@@ -44,7 +49,10 @@ class SPSettings(SPSharedSettings, JSONSharedSettings):
         ("Resource count", "resource_count"),
         ("Color space", "color_space"),
     ]
-    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {"detailsType": "package", "stateType": "graph"}
+    _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
+        "detailsType": "package",
+        "stateType": "graph",
+    }
     replaceUnderscores: bool = field(
         default=True,
         metadata={"group": "General", "label": "Replace _ in graph names with spaces"},
@@ -52,100 +60,8 @@ class SPSettings(SPSharedSettings, JSONSharedSettings):
 
 
 ###########
-# Globals #
+# Context #
 ###########
-
-
-class SPPlugin(RPCBasePlugin):
-    # fmt: off
-    atomic_nodes: ClassVar[frozenset] = frozenset(
-        ["bitmap", "blend", "blur", "channels_shuffle",
-        "curve", "directional_blur", "directional_warp", "distance",
-        "emboss", "fx_map", "gradient_dynamic", "gradient_map",
-        "grayscale_conversion", "hsl", "input_color", "input_grayscale",
-        "levels", "normal", "output", "pixel_processor", "sharpen", "svg",
-        "text", "transformation_2d", "uniform_color", "value_processor", "warp"]
-    )
-    # fmt: on
-    display_types: ClassVar[Dict[str, Callable]] = {
-        "package": lambda ctx: ctx.package_name(),
-        "graph": lambda ctx: ctx.graph_name(),
-        "active_node": lambda ctx: ctx.node_name(),
-        "node_count": lambda ctx: ctx.num_nodes(),
-        "out_node_count": lambda ctx: ctx.num_output_nodes(),
-        "resolution": lambda ctx: ctx.output_resolution(),
-        "material_model": lambda ctx: ctx.material_model(),
-        "resource_count": lambda ctx: ctx.resource_count(),
-        "color_space": lambda ctx: ctx.color_space(),
-    }
-    display_cycle: ClassVar[List[str]] = list(display_types.keys())
-
-    def __init__(self):
-        self.ctx = sd.getContext()
-        self.app = self.ctx.getSDApplication()
-        self.uimgr = self.app.getQtForPythonUIMgr()
-        self.logger = logging.getLogger("DesignerPresenceLogger")
-        if not self.logger.handlers:
-            self.logger.addHandler(self.ctx.createRuntimeLogHandler())
-            self.logger.propagate = False
-            self.logger.setLevel(logging.INFO)
-        super().__init__(
-            app_id="1503302572822499439",
-            app_name="designer",
-            prefs_class=SPSettings,
-            warn=self.logger.warning,
-            error=self.logger.error,
-            path=self.app.getPluginMgr().getUserPluginsDir(),
-        )
-
-    def start(self):
-        self.session.connected = self._connect_rpc()
-        self.session.start_time = time.time()
-        self.reset_callback = self.app.registerAfterFileLoadedCallback(
-            self.on_file_open
-        )
-        self.timer.start()
-
-    def close(self):
-        if self.reset_callback is not None:
-            self.app.unregisterCallback(self.reset_callback)
-        self.timer.stop()
-        try:
-            self.rpc_client.clear()
-            self.rpc_client.close()
-        except Exception:
-            self.logger.exception("[DesignerPresence] failed to clear and close client")
-
-    def _capture(self):
-        return SPContext.capture()
-
-    def on_file_open(self, *args):  # pylint: disable=unused-argument
-        if self.prefs.resetTimer:
-            self.session.start_time = time.time()
-
-    def update_small_icon(self, ctx: SPContext):
-        self.details.small_icon = None
-        self.details.small_icon_text = ""
-        if self.prefs.displaySmallIcon:
-            selected_node = ctx.node_name()
-            if selected_node is None:
-                return
-            s = selected_node.lower().replace("-", "_").replace(" ", "_")
-            s = s.replace("(", "").replace(")", "")
-            if s in self.atomic_nodes:
-                self.details.small_icon_text = selected_node
-                self.details.small_icon = s
-
-    def update_large_icon(self, ctx):
-        if self.prefs.displayVersion:
-            self.details.large_icon_text = (
-                f"Adobe Substance Designer {self.app.getVersion()}"
-            )
-        else:
-            self.details.large_icon_text = "Adobe Substance Designer"
-
-
-SP_PLUGIN = SPPlugin()
 
 
 @dataclass
@@ -241,6 +157,103 @@ class SPContext:
         return f"Color space: {color_engine.getWorkingColorSpaceName()}"
 
 
+###########
+# Globals #
+###########
+
+
+class SPPlugin(RPCBasePlugin):
+    # fmt: off
+    atomic_nodes: ClassVar[frozenset] = frozenset(
+        ["bitmap", "blend", "blur", "channels_shuffle", "curve",
+        "directional_blur", "directional_warp", "distance", "emboss",
+        "fx_map", "gradient_dynamic", "gradient_map", "grayscale_conversion",
+        "hsl", "input_color", "input_grayscale", "levels", "normal",
+        "output","pixel_processor", "sharpen", "svg", "text", "transformation_2d",
+        "uniform_color", "value_processor", "warp"]
+    )
+    # fmt: on
+    display_types: ClassVar[Dict[str, Callable]] = {
+        "package": lambda ctx: ctx.package_name(),
+        "graph": lambda ctx: ctx.graph_name(),
+        "active_node": lambda ctx: ctx.node_name(),
+        "node_count": lambda ctx: ctx.num_nodes(),
+        "out_node_count": lambda ctx: ctx.num_output_nodes(),
+        "resolution": lambda ctx: ctx.output_resolution(),
+        "material_model": lambda ctx: ctx.material_model(),
+        "resource_count": lambda ctx: ctx.resource_count(),
+        "color_space": lambda ctx: ctx.color_space(),
+    }
+    display_cycle: ClassVar[List[str]] = list(display_types.keys())
+
+    def __init__(self):
+        self.ctx = sd.getContext()
+        self.app = self.ctx.getSDApplication()
+        self.uimgr = self.app.getQtForPythonUIMgr()
+        self.logger = logging.getLogger("DesignerPresenceLogger")
+        if not self.logger.handlers:
+            self.logger.addHandler(self.ctx.createRuntimeLogHandler())
+            self.logger.propagate = False
+            self.logger.setLevel(logging.INFO)
+        super().__init__(
+            app_id="1503302572822499439",
+            app_name="designer",
+            prefs_class=SPSettings,
+            warn=self.logger.warning,
+            error=self.logger.error,
+            path=self.app.getPluginMgr().getUserPluginsDir(),
+        )
+
+    def start(self):
+        self.session.connected = self._connect_rpc()
+        self.session.start_time = time.time()
+        self.reset_callback = self.app.registerAfterFileLoadedCallback(
+            self.on_file_open
+        )
+        self.timer.start()
+
+    def close(self):
+        if self.reset_callback is not None:
+            self.app.unregisterCallback(self.reset_callback)
+        self.timer.stop()
+        try:
+            self.rpc_client.clear()
+            self.rpc_client.close()
+        except Exception:
+            self.logger.exception("[DesignerPresence] failed to clear and close client")
+
+    def _capture(self):
+        return SPContext.capture()
+
+    def on_file_open(self, *args):  # pylint: disable=unused-argument
+        if self.prefs.resetTimer:
+            self.session.start_time = time.time()
+
+    def update_small_icon(self, ctx: SPContext):
+        self.details.small_icon = None
+        self.details.small_icon_text = ""
+        if self.prefs.displaySmallIcon:
+            selected_node = ctx.node_name()
+            if selected_node is None:
+                return
+            s = selected_node.lower().replace("-", "_").replace(" ", "_")
+            s = s.replace("(", "").replace(")", "")
+            if s in self.atomic_nodes:
+                self.details.small_icon_text = selected_node
+                self.details.small_icon = s
+
+    def update_large_icon(self, ctx):  # pylint: disable=unused-argument
+        if self.prefs.displayVersion:
+            self.details.large_icon_text = (
+                f"Adobe Substance 3D Designer {self.app.getVersion()}"
+            )
+        else:
+            self.details.large_icon_text = "Adobe Substance 3D Designer"
+
+
+SP_PLUGIN = SPPlugin()
+
+
 #####################
 # GUI Settings Menu #
 #####################
@@ -264,15 +277,11 @@ def sp_open_settings_menu():
         main_window := uimgr.getMainWindow()
     ) is None:
         return
-    SP_PLUGIN.settings_window = QtSettingsGUIMenu(
-        prefs=SP_PLUGIN.prefs,
-        refresh_func=SP_PLUGIN.push_rpc_update,
-        app_name="Designer",
-        parent=main_window,
-    )
-    SP_PLUGIN.settings_window.show()
-    SP_PLUGIN.settings_window.raise_()
-    SP_PLUGIN.settings_window.activateWindow()
+    SP_PLUGIN.make_qt_window("Designer", main_window)
+    if SP_PLUGIN.settings_window:
+        SP_PLUGIN.settings_window.show()
+        SP_PLUGIN.settings_window.raise_()
+        SP_PLUGIN.settings_window.activateWindow()
 
 
 def sp_pause_presence():
@@ -363,8 +372,8 @@ def sp_uninstall_settings_menu():
         menu_bar = main_window.menuBar()
     except RuntimeError:
         SP_PLUGIN.logger.warning(
-            "[DesignerPresence] Could not access menu bar during uninstall:", 
-            exc_info=True
+            "[DesignerPresence] Could not access menu bar during uninstall:",
+            exc_info=True,
         )
         SP_PLUGIN.menubar_item = None
         return

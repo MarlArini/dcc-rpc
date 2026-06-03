@@ -199,22 +199,22 @@ def test_uninstall_no_op_when_not_installed(cmds):
 
 
 # ---------------------------------------------------------------------------
-# mp_show_settings_dialog / mp_open_settings_menu
+# mp_show_settings_dialog
 # ---------------------------------------------------------------------------
 
 
 def test_open_settings_menu_creates_dialog(menu_state_clean):
     mp.MP_SETTINGS_WINDOW = None
-    mp.mp_open_settings_menu()
+    mp.mp_show_settings_dialog()
     assert isinstance(mp.MP_SETTINGS_WINDOW, mp.MayaPresenceSettings)
     assert "Maya" in mp.MP_SETTINGS_WINDOW.windowTitle()
 
 
 def test_open_settings_menu_replaces_existing(menu_state_clean):
     mp.MP_SETTINGS_WINDOW = None
-    mp.mp_open_settings_menu()
+    mp.mp_show_settings_dialog()
     first = mp.MP_SETTINGS_WINDOW
-    mp.mp_open_settings_menu()
+    mp.mp_show_settings_dialog()
     second = mp.MP_SETTINGS_WINDOW
     assert first is not second
     assert isinstance(second, mp.MayaPresenceSettings)
