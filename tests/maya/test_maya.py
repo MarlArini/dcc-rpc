@@ -1136,46 +1136,164 @@ def test_mp_remove_callbacks_idempotent(maya_callbacks_clean):
 # write not a close, so connected stays True on success.)
 # ---------------------------------------------------------------------------
 
-from maya_presence import mp_update_presence, MP_RPC_CLIENT  # noqa: E402
+import maya_presence as _mp_module  # noqa: E402
+from maya_presence import mp_update_presence  # noqa: E402
 
 
-def test_update_presence_disabled_when_not_connected_is_noop(cmds, maya_globals_clean):
-    """generalEnable=False + not-connected should be a quiet no-op (clear()
-    is guarded on MP_SESSION.connected to avoid pypresence's
-    sock_writer-is-None assertion)."""
+# The RPC-client interaction is owned by an in-process worker that
+# mp_update_presence reaches via _get_worker() — which reads the canonical
+# worker reference from `builtins.__mayapresence_worker__`. That indirection
+# exists because Maya's plug-in loader can create more than one copy of
+# maya_presence's module namespace (the MEL render hooks' `import
+# maya_presence` doesn't get cached in sys.modules), so we can't rely on
+# module-level MP_WORKER being non-None in every caller's namespace.
+#
+# These tests install a fake worker into builtins for the duration of the
+# test, then assert against the publishes it recorded.
+
+import builtins as _builtins  # noqa: E402
+
+
+class _FakeWorker:
+    """Minimal stand-in for _MPRPCWorker that records publishes."""
+
+    def __init__(self):
+        self.publishes: List[Tuple[Any, Any]] = []
+        self.last_published = None
+        self.last_publish_enable = None
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self, timeout=2.0):
+        self.stopped = True
+
+    def publish(self, details):
+        # Mirror _MPRPCWorker.publish — record the details snapshot.
+        # (Prefs are no longer published; the real worker reads its
+        # _general_enable flag directly. Tests treat any publish call
+        # as "enabled" since mp_update_presence is the only caller and
+        # only calls publish when generalEnable is True.)
+        self.publishes.append(details)
+        self.last_published = details
+        self.last_publish_enable = True
+
+
+@pytest.fixture
+def fake_worker(monkeypatch):
+    """Swap the canonical worker (on builtins) and the module-level
+    MP_WORKER for a recording fake. Both reads (the _get_worker() path
+    and any direct module references) resolve to the fake during the
+    test, and the previous value (if any) is restored on teardown."""
+    fw = _FakeWorker()
+    attr = _mp_module.MP_WORKER_ATTR
+    had_prior = hasattr(_builtins, attr)
+    prior = getattr(_builtins, attr, None) if had_prior else None
+    setattr(_builtins, attr, fw)
+    monkeypatch.setattr(_mp_module, "MP_WORKER", fw)
+    yield fw
+    # Restore builtins state (monkeypatch handles the module attribute).
+    if had_prior:
+        setattr(_builtins, attr, prior)
+    else:
+        try:
+            delattr(_builtins, attr)
+        except AttributeError:
+            pass
+
+
+def test_update_presence_always_publishes_details(cmds, maya_globals_clean, fake_worker):
+    """mp_update_presence always hands the latest composed details to
+    the worker; the decision of whether to push or clear is made inside
+    the worker's tick (which reads its own _general_enable snapshot)."""
     MP_PREFS.generalEnable = False
-    MP_SESSION.connected = False
     mp_update_presence()
-    assert MP_SESSION.connected is False
+    assert fake_worker.last_published is not None
+    # The publish is unconditional from the caller's side.
+    assert len(fake_worker.publishes) == 1
 
 
-def test_update_presence_disabled_when_connected_preserves_connection(
-    cmds, maya_globals_clean, monkeypatch
-):
-    """A live connection survives a clear() — the socket stays open."""
-    MP_PREFS.generalEnable = False
-    MP_SESSION.connected = True
-    calls: list[int] = []
-    monkeypatch.setattr(MP_RPC_CLIENT, "clear", lambda: calls.append(1))
+def test_update_presence_enabled_publishes_details(cmds, maya_globals_clean, fake_worker):
+    """generalEnable=True publishes the current RPCUpdateDetails to the
+    worker. The worker is responsible for converting that into the
+    pypresence client.update() kwargs via rpc_update."""
+    MP_PREFS.generalEnable = True
+    MP_PREFS.generalUpdate = 25
+    MP_PREFS.enableTime = True
     mp_update_presence()
-    assert len(calls) == 1
-    assert MP_SESSION.connected is True
+    assert fake_worker.last_publish_enable is True
+    details = fake_worker.last_published
+    assert details is not None
+    # The worker is handed the RPCUpdateDetails directly; verify the
+    # expected fields are populated.
+    assert details.large_icon == "maya"
+    assert hasattr(details, "state_text")
+    assert hasattr(details, "details_text")
 
 
-def test_update_presence_disabled_clear_failure_marks_disconnected(
-    cmds, maya_globals_clean, monkeypatch, capsys
-):
-    """If clear() raises, the socket is gone — flip to disconnected so the
-    next generalEnable=True tick reconnects via push_rpc_update."""
-    MP_PREFS.generalEnable = False
-    MP_SESSION.connected = True
-    def _boom():
-        raise AssertionError("sock_writer is None")
-    monkeypatch.setattr(MP_RPC_CLIENT, "clear", _boom)
-    mp_update_presence()
-    assert MP_SESSION.connected is False
-    captured = capsys.readouterr()
-    assert "clear failed" in captured.out
+def test_update_presence_handles_missing_worker(cmds, maya_globals_clean, monkeypatch):
+    """If the canonical worker is unset (plugin not started yet, or torn
+    down), mp_update_presence must not crash — just compose-and-skip."""
+    attr = _mp_module.MP_WORKER_ATTR
+    had_prior = hasattr(_builtins, attr)
+    prior = getattr(_builtins, attr, None) if had_prior else None
+    if had_prior:
+        delattr(_builtins, attr)
+    monkeypatch.setattr(_mp_module, "MP_WORKER", None)
+    try:
+        MP_PREFS.generalEnable = True
+        mp_update_presence()  # should not raise
+    finally:
+        if had_prior:
+            setattr(_builtins, attr, prior)
+
+
+def test_update_presence_reads_worker_from_builtins(cmds, maya_globals_clean,
+                                                    monkeypatch):
+    """Dual-module guarantee: mp_update_presence MUST read the worker
+    from the builtins-stash, not from the module-level MP_WORKER, so a
+    MEL-imported duplicate of maya_presence (which has MP_WORKER=None)
+    still publishes to the original module's worker."""
+    fw = _FakeWorker()
+    attr = _mp_module.MP_WORKER_ATTR
+    had_prior = hasattr(_builtins, attr)
+    prior = getattr(_builtins, attr, None) if had_prior else None
+    setattr(_builtins, attr, fw)
+    # Simulate the duplicate module having a None module-level MP_WORKER.
+    monkeypatch.setattr(_mp_module, "MP_WORKER", None)
+    try:
+        MP_PREFS.generalEnable = True
+        mp_update_presence()
+        assert fw.last_publish_enable is True
+    finally:
+        if had_prior:
+            setattr(_builtins, attr, prior)
+        else:
+            try:
+                delattr(_builtins, attr)
+            except AttributeError:
+                pass
+
+
+# Note: the previous build_payload tests were removed when _build_payload
+# stopped existing — the threaded worker stores RPCUpdateDetails directly
+# and hands it to common.rpc_update, which owns the empty-details-text
+# substitution. That behavior is covered by tests in tests/common.
+
+
+def test_shared_state_across_module_copies():
+    """Dual-module guarantee for prefs/session/details: a second import
+    of maya_presence should observe the same canonical instances on
+    builtins. We can't actually import a duplicate module in-process
+    (sys.modules caches the first one) — but we can verify the stash
+    contract: the module-level names ARE the builtins-stashed instances."""
+    import builtins as _b  # noqa: PLC0415
+    import maya_presence as _mp  # noqa: PLC0415
+    assert _mp.MP_PREFS is getattr(_b, _mp.MP_PREFS_ATTR)
+    assert _mp.MP_SESSION is getattr(_b, _mp.MP_SESSION_ATTR)
+    assert _mp.MP_UPDATE_DETAILS is getattr(_b, _mp.MP_UPDATE_DETAILS_ATTR)
 
 
 def test_get_gpu_str_no_slash_preserves_full_name(cmds):

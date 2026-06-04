@@ -180,8 +180,8 @@ class RPCUpdateDetails:
 
     def __init__(self, app_icon_name):
         self.start_time: float = time.time()
-        self.state_text: str = ""
-        self.details_text: str = ""
+        self.state_text: str = "  "
+        self.details_text: str = "  "
         self.small_icon: str | None = None
         self.small_icon_text: str = ""
         self.large_icon: str = app_icon_name

@@ -95,7 +95,7 @@ def _bundle_maya(pypresence_src: Path) -> None:
           maya_presence.mod
           shared/plug-ins/
             maya_presence.py
-            common.py
+            common/
             pypresence/
     """
     src = REPO / "maya_presence"

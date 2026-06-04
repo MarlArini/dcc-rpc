@@ -504,15 +504,6 @@ def sp_close_settings_menu():
             pass
 
 
-def sp_open_settings_menu():
-    sp_close_settings_menu()
-    SP_PLUGIN.make_qt_window("Painter", sp.ui.get_main_window())
-    if SP_PLUGIN.settings_window:
-        SP_PLUGIN.settings_window.show()
-        SP_PLUGIN.settings_window.raise_()
-        SP_PLUGIN.settings_window.activateWindow()
-
-
 def sp_pause_presence():
     SP_PLUGIN.prefs.generalEnable = False
     SP_PLUGIN.prefs.flush()
@@ -568,6 +559,13 @@ def _sp_remove_discord_menu(menu_bar):
             menu.deleteLater()
         except RuntimeError:
             pass
+
+
+def sp_open_settings_menu():
+    try:
+        SP_PLUGIN.show_qt_window("Painter", sp.ui.get_main_window())
+    except sp.exception.ServiceNotFoundError: # pyright: ignore[reportGeneralTypeIssues]
+        pass
 
 
 def sp_install_settings_menu():

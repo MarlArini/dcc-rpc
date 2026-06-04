@@ -5,20 +5,34 @@ and Maya 2027. For more info, see https://github.com/MarlArini/dcc-rpc.
 """
 
 import atexit
+import builtins
+import copy
+import threading
 from dataclasses import dataclass, fields, field
 from enum import Enum
 import os
 from pathlib import Path
 import re
 import time
-from typing import ClassVar, List, cast, Tuple, Any, get_type_hints, Dict
+from typing import (
+    ClassVar,
+    List,
+    cast,
+    Tuple,
+    Any,
+    get_type_hints,
+    Dict,
+    Optional,
+    Callable,
+)
 
-from pypresence.presence import Presence
-
-# pylint: disable=import-error,no-name-in-module,line-too-long,unused-import
+# pylint: disable=import-error, no-name-in-module, line-too-long, unused-import, too-many-lines
 import maya.api.OpenMaya as om  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # pyright: ignore[reportMissingImports]
 import maya.cmds as cmds  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
+
+from pypresence.presence import Presence
+from pypresence import exceptions as pypresence_exceptions
 
 from common import (
     RPCUpdateDetails,
@@ -29,19 +43,17 @@ from common import (
     get_file_size_str,
     shorten_number,
     update_buttons,
-    force_clear_on_exit,
-    connect_rpc,
-    push_rpc_update,
+    rpc_update,
     advance_cycle,
     update_slot,
     format_render_details,
     plural as mp_plural,
-    on_render_start as mp_on_render_start,
-    on_render_end as mp_on_render_end,
-    on_frame_render_end as mp_on_frame_render_end,
-    DISCORD_SHORT_TERM_RATE_LIMIT,
+    on_render_start,
+    on_render_end,
+    on_frame_render_end,
 )
-# pylint: enable=import-error,no-name-in-module,line-too-long,unused-import
+
+# pylint: enable=import-error, no-name-in-module, line-too-long, unused-import
 
 ############
 # Settings #
@@ -73,17 +85,27 @@ class MPSettings(SharedSettings, RenderSettings):
         "detailsType": "scene",
         "stateType": "poly",
     }
-    displayGPU: bool = field(
-        default=False,
-        metadata={"group": "Details", "label": "Display GPU name in details"},
-    )
     countExtensions: bool = field(
         default=True,
         metadata={
-            "group": "Render Extensions",
+            "group": "General",
             "label": (
                 "Count lights, materials, and textures from third-party renderers"
             ),
+        },
+    )
+    useRenderHooks: bool = field(
+        default=True,
+        metadata={
+            "group": "Rendering",
+            "label": "Add MEL hook to scene pre/post render events for render detection",
+        },
+    )
+    displayGPU: bool = field(
+        default=False,
+        metadata={
+            "group": "Rendering",
+            "label": "Display GPU name in details when rendering",
         },
     )
 
@@ -105,9 +127,7 @@ class MPSettings(SharedSettings, RenderSettings):
     def __setattr__(self, name: str, value: Any):
         object.__setattr__(self, name, value)
         # Skip persistence for private attrs and for the bootstrap phase (the
-        # dataclass-generated __init__ runs field assignments BEFORE __post_init__;
-        # without this guard those assignments would clobber the user's saved
-        # optionVars with the class defaults).
+        # dataclass-generated __init__ runs field assignments BEFORE __post_init__)
         if name.startswith("_") or not getattr(self, "_loaded", False):
             return
         declared = [f.name for f in fields(self)]
@@ -134,13 +154,162 @@ class MPSettings(SharedSettings, RenderSettings):
 # Globals #
 ###########
 
-MP_RPC_CLIENT = Presence("1498143095852634252")
+
+MP_DISCORD_APP_ID = "1498143095852634252"
 MP_CALLBACKS: set[Tuple[str, int]] = set()
 MP_TIMER_CALLBACK_ID = None
 MP_SETTINGS_WINDOW = None
-MP_PREFS = MPSettings()
-MP_SESSION = SessionInfo()
-MP_UPDATE_DETAILS = RPCUpdateDetails("maya")
+
+# Maya's plug-in loader doesn't put this file in sys.modules, so any
+# `import maya_presence` from a MEL hook creates a duplicate module
+# with its own globals. Fix: keep the canonical instance on builtins.
+MP_WORKER_ATTR = "__mayapresence_worker__"
+MP_PREFS_ATTR = "__mayapresence_prefs__"
+MP_SESSION_ATTR = "__mayapresence_session__"
+MP_UPDATE_DETAILS_ATTR = "__mayapresence_update_details__"
+
+
+def _share_via_builtins(attr: str, factory: Callable[[], Any]) -> Any:
+    """First module to load calls factory() and stashes the instance on
+    builtins under `attr`; later modules retrieve that instance."""
+    existing = getattr(builtins, attr, None)
+    if existing is not None:
+        return existing
+    instance = factory()
+    setattr(builtins, attr, instance)
+    return instance
+
+
+MP_PREFS: MPSettings = _share_via_builtins(MP_PREFS_ATTR, MPSettings)
+MP_SESSION: SessionInfo = _share_via_builtins(MP_SESSION_ATTR, SessionInfo)
+MP_UPDATE_DETAILS: RPCUpdateDetails = _share_via_builtins(
+    MP_UPDATE_DETAILS_ATTR, lambda: RPCUpdateDetails("maya")
+)
+
+
+def mp_print(msg: str):
+    print(f"[MayaPresence] {msg}")
+
+
+def _get_worker():
+    return getattr(builtins, MP_WORKER_ATTR, None)
+
+
+def _set_worker(worker):
+    setattr(builtins, MP_WORKER_ATTR, worker)
+
+
+##############
+# RPC worker #
+##############
+
+_RPC_LOST_EXC = (
+    pypresence_exceptions.InvalidID,
+    pypresence_exceptions.PipeClosed,
+    pypresence_exceptions.DiscordNotFound,
+    pypresence_exceptions.ServerError,
+    AssertionError,
+)
+
+
+class _MPRPCWorker(threading.Thread):
+    """Daemon thread that owns the Presence client.
+    During sequence renders and certain other events like file dialogs,
+    the Maya application is not considered idle, and so om.MTimerMessage
+    will never fire. Qt timers also do not tick during a sequence render.
+    The solution is to have a background thread that pushes RPC updates,
+    and to update presence details manually from the MEL callbacks for
+    render start/end.
+    The thread handles rate limiting updates, so callers can publish
+    to it as frequently as they desire."""
+
+    def __init__(self, app_id: str):
+        super().__init__(name="MayaPresenceRPC", daemon=True)
+        self._client = Presence(app_id)
+        self._connected = False
+        self._stop = threading.Event()
+        self._stopped = False
+        self._last_update_time = 0.0
+        self._lock = threading.Lock()
+        self._details = RPCUpdateDetails("maya")
+
+    def stop(self, timeout: float = 2.0) -> None:
+        if self._stopped:
+            return
+        self._stopped = True
+        self._stop.set()
+        if self.is_alive() and threading.current_thread() is not self:
+            try:
+                self.join(timeout=timeout)
+            except RuntimeError:
+                pass
+        try:
+            if self._connected:
+                self._client.clear()
+        except BaseException:
+            pass
+        try:
+            self._client.close()
+        except BaseException:
+            pass
+        self._connected = False
+
+    def _ensure_connected(self) -> bool:
+        if self._connected:
+            return True
+        try:
+            self._client.connect()
+            self._connected = True
+            return True
+        except Exception as e:  # noqa: BLE001
+            mp_print(f"worker connect failed: {e}")
+            return False
+
+    def _push(self) -> None:
+        if not self._ensure_connected():
+            return
+        try:
+            with self._lock:
+                rpc_update(self._details, self._client, MP_PREFS.enableTime)
+        except _RPC_LOST_EXC as e:
+            self._connected = False
+            mp_print(f"worker push failed: {e}")
+        except Exception as e:  # noqa: BLE001
+            mp_print(f"worker push error (non-fatal): {e}")
+
+    def publish(self, details) -> None:
+        """Called at the end of mp_update_presence. Makes a local copy of
+        the details object which is used in RPC updates to avoid reading a
+        half-updated details object with inconsistent fields if the thread
+        ticks for an update between events in the mp_update_presence function.
+        Prefs are not copied since they only update one-at-a-time via user
+        interaction, while details need to be updated all at once.
+        """
+        with self._lock:
+            self._details = copy.copy(details)
+
+    def _clear(self) -> None:
+        if not self._connected:
+            return
+        try:
+            self._client.clear()
+        except _RPC_LOST_EXC as e:
+            self._connected = False
+            mp_print(f"worker clear failed: {e}")
+        except Exception as e:  # noqa: BLE001
+            mp_print(f"worker clear error (non-fatal): {e}")
+
+    def run(self) -> None:
+        while not self._stopped:
+            self._stop.wait(1)
+            if not MP_PREFS.generalEnable:
+                continue
+            if time.time() - self._last_update_time > MP_PREFS.generalUpdate:
+                self._push()
+                self._last_update_time = time.time()
+
+
+MP_WORKER: Optional[_MPRPCWorker] = None
 
 
 class MPExtensionMonitor:
@@ -148,17 +317,12 @@ class MPExtensionMonitor:
     Watch known render engine plugins (Redshift, Arnold, V-Ray, RenderMan, Octane).
     We maintain whether the engine is loaded and a list of its custom types, so
     if the user enables counting lights, materials, or textures from the engine
-    we can iterate the types and count them with `cmds.ls`
+    we can iterate the types and count them with `cmds.ls`.
     """
 
     class Engine:
         def __init__(
-            self,
-            pn: str,
-            rn: str,
-            light_path=None,
-            mat_path=None,
-            tex_path=None,
+            self, pn: str, rn: str, light_path=None, mat_path=None, tex_path=None
         ):
             self.plugin_name = pn
             self.registry_name = rn
@@ -396,15 +560,8 @@ class MPContext:
             u = cast(str, cmds.currentUnit(query=True, time=True)) or ""
         except RuntimeError:
             return 24
-        presets = {
-            "game": 15,
-            "film": 24,
-            "pal": 25,
-            "ntsc": 30,
-            "show": 48,
-            "palf": 50,
-            "ntscf": 60,
-        }
+        presets = {"game": 15, "film": 24, "pal": 25, "ntsc": 30,
+                   "show": 48, "palf": 50, "ntscf": 60}  # fmt: skip
         if u in presets:
             return presets[u]
         if u.endswith("fps"):
@@ -438,68 +595,76 @@ def mp_update_large_icon(ctx: MPContext):
         MP_UPDATE_DETAILS.large_icon_text = "Maya"
 
 
+def mp_update_small_icon_rendering(ctx: MPContext):
+    icon_file_name = None
+    icon_text = ""
+    # No icons for Maya Software / Maya Hardware
+    engines = ["Arnold", "Redshift", "RenderMan", "V-Ray", "Octane"]
+    current_engine = ctx.get_render_engine_str()
+    if current_engine in engines:
+        icon_file_name = current_engine.lower().replace("-", "")
+        icon_text = current_engine
+    # GPU
+    if MP_PREFS.displayGPU:
+        gpustr = ctx.get_gpu_str()
+        if gpustr and icon_text:
+            icon_text += " | " + gpustr
+    return icon_file_name, icon_text
+
+
+def mp_update_small_icon_tool():
+    icon_file_name = None
+    icon_text = ""
+    tc = cmds.currentCtx()
+    if (
+        tc.startswith("poly")
+        or tc.startswith("manip")
+        or tc.startswith("curve")
+        or tc.startswith("target")
+    ):
+        icon_file_name = "modeling"
+        icon_text = "Modeling"
+    elif tc.startswith("sculpt"):
+        icon_file_name = "sculpt"
+        icon_text = "Sculpting"
+    elif tc.startswith("tex"):
+        icon_file_name = "uv"
+        icon_text = "UV Editing"
+    elif tc.startswith("joint") or tc.startswith("ik") or tc.startswith("skin"):
+        icon_file_name = "pose"
+        icon_text = "Rigging"
+    elif tc.startswith("keyframe") or tc.startswith("filter"):
+        icon_file_name = "animation"
+        icon_text = "Animation"
+    return icon_file_name, icon_text
+
+
 def mp_update_small_icon(ctx: MPContext):
     icon_file_name = None
     icon_text = ""
-    if MP_PREFS.displaySmallIcon:
-        if MP_PREFS.displayEngine and MP_SESSION.is_rendering:
-            # No icons for Maya Software / Maya Hardware
-            engines = ["Arnold", "Redshift", "RenderMan", "V-Ray", "Octane"]
-            current_engine = ctx.get_render_engine_str()
-            if current_engine in engines:
-                icon_file_name = current_engine.lower().replace("-", "")
-                icon_text = current_engine
-            # GPU
-            if MP_PREFS.displayGPU:
-                gpustr = ctx.get_gpu_str()
-                if gpustr and icon_text:
-                    icon_text += " | " + gpustr
+    if not MP_PREFS.displaySmallIcon:
+        MP_UPDATE_DETAILS.small_icon = icon_file_name
+        MP_UPDATE_DETAILS.small_icon_text = icon_text
+        return
+    if MP_PREFS.displayEngine and MP_SESSION.is_rendering:
+        icon_file_name, icon_text = mp_update_small_icon_rendering(ctx)
+    else:
+        try:
+            # "Modeling - Expert", "Pose Sculpting", etc.
+            space_name = (
+                cmds.workspaceLayoutManager(query=True, current=True).lower() or ""
+            )
+        except Exception:
+            space_name = ""
+        if space_name and space_name != "general":
+            icon_file_name = (
+                space_name[: space_name.find(" ")]
+                if space_name.find(" ") > 0
+                else space_name
+            )
+            icon_text = space_name.title()
         else:
-            try:
-                # "Modeling - Expert", "Pose Sculpting", etc.
-                space_name = (
-                    cast(
-                        str, cmds.workspaceLayoutManager(query=True, current=True)
-                    ).lower()
-                    or ""
-                )
-            except Exception:
-                space_name = ""
-            if space_name and space_name != "general":
-                icon_file_name = (
-                    space_name[: space_name.find(" ")]
-                    if space_name.find(" ") > 0
-                    else space_name
-                )
-                icon_text = space_name
-            else:
-                tool_context = cmds.currentCtx()
-                if (
-                    tool_context.startswith("poly")
-                    or tool_context.startswith("manip")
-                    or tool_context.startswith("curve")
-                    or tool_context.startswith("target")
-                ):
-                    icon_file_name = "modeling"
-                    icon_text = "Modeling"
-                elif tool_context.startswith("sculpt"):
-                    icon_file_name = "sculpt"
-                    icon_text = "Sculpting"
-                elif tool_context.startswith("tex"):
-                    icon_file_name = "uv"
-                    icon_text = "UV Editing"
-                elif (
-                    tool_context.startswith("joint")
-                    or tool_context.startswith("ik")
-                    or tool_context.startswith("skin")
-                ):
-                    icon_file_name = "pose"
-                    icon_text = "Rigging"
-                elif tool_context.startswith("keyframe") or tool_context.startswith(
-                    "filter"
-                ):
-                    icon_file_name = "animation"
-                    icon_text = "Animation"
+            icon_file_name, icon_text = mp_update_small_icon_tool()
     MP_UPDATE_DETAILS.small_icon = icon_file_name
     MP_UPDATE_DETAILS.small_icon_text = icon_text
 
@@ -547,24 +712,153 @@ def mp_update_presence_state(ctx: MPContext):
 
 
 def mp_update_presence():
-    if MP_PREFS.generalEnable:
+    try:
         if MP_PREFS.detailsCycle or MP_PREFS.stateCycle:
             advance_cycle(MP_SESSION, MP_DISPLAY_TYPES)
         ctx = MPContext.capture()
         if ctx is None:
             return
-        mp_update_large_icon(ctx)
-        mp_update_small_icon(ctx)
-        mp_update_presence_state(ctx)
-        mp_update_presence_details(ctx)
-        update_buttons(MP_UPDATE_DETAILS, MP_PREFS)
-        push_rpc_update(MP_SESSION, MP_UPDATE_DETAILS, MP_PREFS, MP_RPC_CLIENT, "Maya")
-    elif MP_SESSION.connected:
+        else:
+            mp_update_large_icon(ctx)
+            mp_update_small_icon(ctx)
+            mp_update_presence_state(ctx)
+            mp_update_presence_details(ctx)
+            update_buttons(MP_UPDATE_DETAILS, MP_PREFS)
+            MP_UPDATE_DETAILS.start_time = MP_SESSION.start_time
+    except Exception as e:  # noqa: BLE001
+        mp_print(f"Failed to publish update to worker thread: {e}")
+    worker = _get_worker()
+    if worker is not None:
+        worker.publish(MP_UPDATE_DETAILS)
+
+
+###################
+# Render Handlers #
+###################
+
+MP_HOOK_START = "/* MayaPresence:Hook:Begin */"
+MP_HOOK_END = " /* MayaPresence:Hook:End */"
+
+
+def mp_wrap_mel(
+    py_call: Callable[[], None], surface_except: bool = False, wrap: bool = True
+) -> str:
+    """
+    Accept a Python function name from this module and return a MEL expression which will invoke it.
+    The Python function cannot take arguments. The MEL will be comment-wrapped with indicators
+    that it came from MayaPresence, and the Python will be in a try-except that silently fails.
+    """
+    mp = "_mp"
+    start = f"{MP_HOOK_START} " if wrap else ""  # fmt: skip
+    end = f"{MP_HOOK_END}" if wrap else ""  # fmt:skip
+    exc = ' as e:","\tprint(e)")' if surface_except else ':","\tpass")'
+    exc = f'"except Exception{exc}'
+    return (
+        f"{start}"
+        f'python("try:","\timport maya_presence as {mp}",'
+        f'"\t{mp}.{py_call.__name__}()",'
+        f"{exc}"
+        f"{end}"
+    )
+
+
+def mp_on_render_start():
+    on_render_start(MP_SESSION)
+    mp_update_presence()
+
+
+def mp_on_render_end():
+    on_render_end(MP_SESSION)
+    mp_update_presence()
+
+
+def mp_on_frame_render_end():
+    on_frame_render_end(MP_SESSION)
+    mp_update_presence()
+
+
+# Render-hook install sites: (node, attr, py_call).
+#
+#   defaultRenderGlobals  — Maya's stock node, used by Maya Software,
+#                           Maya Hardware, Arnold, V-Ray, RenderMan, etc.
+#                           Per empirical observation, preMel/postMel
+#                           fire per-frame and postRenderMel fires once
+#                           at the end of a sequence.
+#
+#   redshiftOptions       — Redshift's own options node, only exists when
+#                           the Redshift plug-in is loaded. Redshift's
+#                           semantics are cleaner: preRenderMel and
+#                           postRenderMel bracket the entire render;
+#                           postRenderFrameMel fires per frame.
+#
+_RENDER_HOOK_SITES: "List[Tuple[str, str, Callable[[], None]]]" = [
+    ("defaultRenderGlobals", "preMel", mp_on_render_start),
+    ("defaultRenderGlobals", "postMel", mp_on_render_end),
+    ("defaultRenderGlobals", "postRenderMel", mp_on_frame_render_end),
+    ("redshiftOptions", "preRenderMel", mp_on_render_start),
+    ("redshiftOptions", "postRenderMel", mp_on_render_end),
+    ("redshiftOptions", "postRenderFrameMel", mp_on_frame_render_end),
+]
+
+
+def _hook_state(node: str, attr: str) -> bool:
+    """Returns True if a hook is currently installed at <node>.<attr> or
+    the attribute doesn't exist (e.g., an engine that isn't loaded), and
+    False if the attr exists but our fragment isn't there."""
+    try:
+        existing = cmds.getAttr(f"{node}.{attr}")
+    except (RuntimeError, ValueError): # fmt: skip
+        return True
+    if existing is None:
+        return False
+    return MP_HOOK_START in existing
+
+
+def mp_check_render_handlers_installed() -> bool:
+    """Return True if all hooks are installed."""
+    for node, attr, _py in _RENDER_HOOK_SITES:
+        if not _hook_state(node, attr):
+            return False
+    return True
+
+
+def mp_install_render_handlers(*args):  # pylint: disable=unused-argument
+    """Append our hook fragment to each render-hook site that exists and
+    doesn't already have our fragment."""
+    if not MP_PREFS.useRenderHooks:
+        return
+    for node, attr, py_call in _RENDER_HOOK_SITES:
+        state = _hook_state(node, attr)
+        if state:
+            continue  # already installed or does not exist
+        plug = f"{node}.{attr}"
         try:
-            MP_RPC_CLIENT.clear()
-        except Exception as e:  # noqa: BLE001
-            print(f"[MayaPresence] clear failed: {e}")
-            MP_SESSION.connected = False
+            existing = cmds.getAttr(plug) or ""
+            cmds.setAttr(plug, existing + mp_wrap_mel(py_call), type="string")
+        except (RuntimeError, ValueError) as e:
+            mp_print(f"could not install handler {plug}: {e}")
+
+
+def mp_uninstall_render_handlers(*args):  # pylint: disable=unused-argument
+    """Strip hooks from every applicable site."""
+    pattern = re.compile(
+        re.escape(MP_HOOK_START) + r".*?" + re.escape(MP_HOOK_END), re.DOTALL
+    )
+    for node, attr, _py in _RENDER_HOOK_SITES:
+        plug = f"{node}.{attr}"
+        try:
+            existing = cmds.getAttr(plug)
+        except RuntimeError:
+            continue  # node not present
+        if not existing:
+            continue
+        stripped = pattern.sub("", existing)
+        if stripped == existing:
+            continue
+        try:
+            cmds.setAttr(plug, stripped, type="string")
+        except (RuntimeError, ValueError) as e:
+            mp_print(f"could not restore handler {plug}: {e}")
 
 
 #####################
@@ -577,8 +871,11 @@ class MayaPresenceSettings(MayaQWidgetDockableMixin, QtSettingsGUIMenu):
 
 
 def mp_on_setting_change():
-    if time.time() - MP_SESSION.last_update > DISCORD_SHORT_TERM_RATE_LIMIT:
-        mp_update_presence()
+    if not MP_PREFS.useRenderHooks and mp_check_render_handlers_installed():
+        mp_uninstall_render_handlers()
+    elif MP_PREFS.useRenderHooks and not mp_check_render_handlers_installed():
+        mp_install_render_handlers()
+    mp_update_presence()
     mp_refresh_timer()
 
 
@@ -612,12 +909,7 @@ def _mp_add_settings_menu_item():
     )
 
 
-# MEL fragment appended to mainWindowMenu's post-menu callback.
-# Same approach as MayaUSD's addMenuCallback / mayaUsdMenu_windowMenuCallback.
-MP_MENU_PMC = (
-    f'python("try:","\timport maya_presence as _mp",'
-    f'"\t_mp.{_mp_add_settings_menu_item.__name__}()","except:","\tpass")'
-)
+MP_MENU_PMC = mp_wrap_mel(_mp_add_settings_menu_item, True, False)
 
 
 def mp_install_settings_menu():
@@ -655,89 +947,6 @@ def mp_uninstall_settings_menu():
             pass
 
 
-###################
-# Render Handlers #
-###################
-
-MP_HOOK_START = "/* MayaPresence:Hook:Begin */"
-MP_HOOK_END = " /* MayaPresence:Hook:End */"
-
-
-def mp_wrap_mel(py_call: str) -> str:
-    """
-    Accept a Python function name from this module and return a MEL expression which will invoke it.
-    The Python function cannot take arguments. The MEL will be comment-wrapped with indicators
-    that it came from MayaPresence, and the Python will be in a try-except that silently fails.
-    """
-    return (
-        f"{MP_HOOK_START} "
-        f'python("try:","\timport maya_presence as _mp","\t_mp.{py_call}","except:","\tpass")'
-        f"{MP_HOOK_END}"
-    )
-
-
-def mp_check_render_handlers_installed() -> bool:
-    """Check if any render handlers are already installed"""
-    for attr in ["preMel", "postMel", "postRenderMel"]:
-        try:
-            existing = cmds.getAttr(f"defaultRenderGlobals.{attr}")
-            if existing is not None and MP_HOOK_START in existing:
-                return True
-        except RuntimeError as e:
-            print(
-                f"[MayaPresence] could not check render events for handler {attr}: ", e
-            )
-            continue
-    return False
-
-
-def mp_install_render_handlers(*args):  # pylint: disable=unused-argument
-    """
-    Add hooks to the preMel, postMel, and postRenderMel events that will update the session
-    information when rendering starts and ends, and when a frame finishes rendering. Use
-    __name__ on the functions instead of passing as strings to prevent unused import messages
-    and accidental deletion of the imports, making the calls fail at runtime.
-    """
-    if mp_check_render_handlers_installed():
-        return
-    pairs = [
-        ("preMel", f"{mp_on_render_start.__name__}(MP_SESSION, MP_PREFS)"),
-        ("postMel", f"{mp_on_render_end.__name__}(MP_SESSION, MP_PREFS)"),
-        ("postRenderMel", f"{mp_on_frame_render_end.__name__}(MP_SESSION)"),
-    ]
-    for attr, py_call in pairs:
-        plug = f"defaultRenderGlobals.{attr}"
-        try:
-            existing = cmds.getAttr(plug) or ""
-            mel = mp_wrap_mel(py_call)
-            merged = existing + mel
-            cmds.setAttr(plug, merged, type="string")
-        except RuntimeError as e:
-            print(f"[MayaPresence] Could not install handler {attr}:", e)
-
-
-def mp_uninstall_render_handlers(*args):  # pylint: disable=unused-argument
-    """
-    Remove the render event hooks by searching for the MayaPresence tags surrounding them
-    and removing all MEL between them from the preMel, postMel, and postRenderMel events.
-    """
-    if not mp_check_render_handlers_installed():
-        return
-    pattern = re.compile(
-        re.escape(MP_HOOK_START) + r".*?" + re.escape(MP_HOOK_END), re.DOTALL
-    )
-    for attr in ["preMel", "postMel", "postRenderMel"]:
-        plug = f"defaultRenderGlobals.{attr}"
-        try:
-            existing = cmds.getAttr(plug)
-            if not existing:
-                continue
-            stripped = pattern.sub("", existing)
-            cmds.setAttr(plug, stripped, type="string")
-        except (RuntimeError, ValueError) as e:
-            print(f"[MayaPresence] Could not restore handler {attr}:", e)
-
-
 #############
 # Callbacks #
 #############
@@ -745,15 +954,12 @@ def mp_uninstall_render_handlers(*args):  # pylint: disable=unused-argument
 
 def mp_observe_plugin_load(string_array, clientData):  # pylint: disable=unused-argument,invalid-name
     """
-    If render stats are on, check if plugin loading removed the handlers.
     See if a render engine was loaded and update the extensions data if so.
     """
     if not string_array:
         return
     # kAfterPluginLoad string array: [plugin_path, plugin_name]
     loaded_plugin_name = string_array[-1]
-    if MP_PREFS.displayRenderStats and not mp_check_render_handlers_installed():
-        mp_install_render_handlers()
     for engine_name, engine in MP_EXTENSIONS.monitored_engines.items():
         if engine.plugin_name == loaded_plugin_name:
             MP_EXTENSIONS.init_engine(engine_name)
@@ -762,15 +968,12 @@ def mp_observe_plugin_load(string_array, clientData):  # pylint: disable=unused-
 
 def mp_observe_plugin_unload(string_array, clientData):  # pylint: disable=unused-argument,invalid-name
     """
-    If render stats are on, check if plugin unloading removed the handlers.
-    If a render engine was unloaded, update the extensions data.
+    Check if plugin unloading removed a render engine
     """
     if not string_array:
         return
     # kAfterPluginUnload string array: [plugin_name, plugin_path]
     unloaded_plugin_name = string_array[0]
-    if MP_PREFS.displayRenderStats and not mp_check_render_handlers_installed():
-        mp_install_render_handlers()
     for _, engine in MP_EXTENSIONS.monitored_engines.items():
         if engine.plugin_name == unloaded_plugin_name:
             engine.loaded = False
@@ -779,48 +982,29 @@ def mp_observe_plugin_unload(string_array, clientData):  # pylint: disable=unuse
 def mp_add_callbacks():
     """
     Register all callbacks.
-    1. kAfterNew, kAfterOpen: Add the render handlers to fresh / opened
-       scenes if displayRenderStats is on. The handlers stay in the scene
-       across saves.
+    1. kAfterNew, kAfterOpen: Call the render hook installers on new or opened
+        scenes. The handlers respect the user install preferences.
     2. kAfterPluginLoad: check if the plugin clobbered the callbacks. Also,
-       check if the plugin is a known render engine (Arnold, Redshift, V-Ray,
-       RMan) and, if so, flag this to possibly enable counting engine-specific
-       types.
+       check if the plugin is a known render engine and load its types.
     3. kAfterPluginUnload: check if hooks were clobbered on unload, and if a
        monitored engine is no longer present.
     """
-    MP_CALLBACKS.add(
-        (
-            "kAfterNew",
-            om.MSceneMessage.addCallback(
-                om.MSceneMessage.kAfterNew, mp_install_render_handlers
-            ),
-        )
+    k_new = om.MSceneMessage.addCallback(
+        om.MSceneMessage.kAfterNew, mp_install_render_handlers
     )
-    MP_CALLBACKS.add(
-        (
-            "kAfterOpen",
-            om.MSceneMessage.addCallback(
-                om.MSceneMessage.kAfterOpen, mp_install_render_handlers
-            ),
-        )
+    k_open = om.MSceneMessage.addCallback(
+        om.MSceneMessage.kAfterOpen, mp_install_render_handlers
     )
-    MP_CALLBACKS.add(
-        (
-            "kAfterPluginLoad",
-            om.MSceneMessage.addStringArrayCallback(
-                om.MSceneMessage.kAfterPluginLoad, mp_observe_plugin_load
-            ),
-        )
+    k_load = om.MSceneMessage.addStringArrayCallback(
+        om.MSceneMessage.kAfterPluginLoad, mp_observe_plugin_load
     )
-    MP_CALLBACKS.add(
-        (
-            "kAfterPluginUnload",
-            om.MSceneMessage.addStringArrayCallback(
-                om.MSceneMessage.kAfterPluginUnload, mp_observe_plugin_unload
-            ),
-        )
+    k_unload = om.MSceneMessage.addStringArrayCallback(
+        om.MSceneMessage.kAfterPluginUnload, mp_observe_plugin_unload
     )
+    MP_CALLBACKS.add(("kAfterNew", k_new))
+    MP_CALLBACKS.add(("kAfterOpen", k_open))
+    MP_CALLBACKS.add(("kAfterPluginLoad", k_load))
+    MP_CALLBACKS.add(("kAfterPluginUnload", k_unload))
 
 
 def mp_remove_callbacks():
@@ -832,7 +1016,7 @@ def mp_remove_callbacks():
         try:
             om.MMessage.removeCallback(cb_id)
         except RuntimeError as e:
-            print(f"[MayaPresence] Failed to remove callback {cb_name}: ", e)
+            mp_print(f"failed to remove callback {cb_name}: {e}")
     MP_CALLBACKS.clear()
 
 
@@ -842,6 +1026,10 @@ def mp_remove_callbacks():
 
 
 def mp_on_timer(elapsed_time, last_time, client_data):  # pylint: disable=unused-argument
+    # Redshift appears to lazily install its MEL callbacks, only creating the objects
+    # when the Redshift render settings are first opened.
+    if not mp_check_render_handlers_installed():
+        mp_install_render_handlers()
     mp_update_presence()
 
 
@@ -890,8 +1078,16 @@ def mp_check_loaded_engines():
 def mp_start():
     if cmds.about(batch=True):
         return
-    MP_SESSION.connected = connect_rpc(MP_RPC_CLIENT, "Maya")
     MP_SESSION.start_time = time.time()
+    global MP_WORKER
+    existing_worker = _get_worker()
+    if existing_worker is not None:
+        MP_WORKER = existing_worker
+    else:
+        MP_WORKER = _MPRPCWorker(MP_DISCORD_APP_ID)
+        MP_WORKER.start()
+        _set_worker(MP_WORKER)
+    mp_update_presence()
     if MP_PREFS.displayRenderStats:
         mp_install_render_handlers()
     mp_install_settings_menu()
@@ -903,20 +1099,24 @@ def mp_start():
 def mp_stop():
     if cmds.about(batch=True):
         return
+    global MP_WORKER
+    worker = MP_WORKER
     cleanup_steps = [
         ("cancel timer", mp_cancel),
-        ("clear presence", lambda: MP_RPC_CLIENT.clear() if MP_RPC_CLIENT else None),
-        ("close RPC client", lambda: MP_RPC_CLIENT.close() if MP_RPC_CLIENT else None),
+        ("stop RPC worker", worker.stop if worker is not None else None),
         ("remove callbacks", mp_remove_callbacks),
         ("uninstall render handlers", mp_uninstall_render_handlers),
         ("uninstall settings menu", mp_uninstall_settings_menu),
     ]
     for description, step in cleanup_steps:
+        if step is None:
+            continue
         try:
             step()
         except Exception as e:
-            print(f"[MayaPresence] Failed to {description}: {e}")
-    MP_SESSION.connected = False
+            mp_print(f"failed to {description}: {e}")
+    MP_WORKER = None
+    delattr(builtins, MP_WORKER_ATTR)
 
 
 def initializePlugin(mobject):
@@ -929,4 +1129,15 @@ def uninitializePlugin(plugin):
     mp_stop()
 
 
-atexit.register(force_clear_on_exit, MP_RPC_CLIENT)
+def _mp_atexit():
+    """Insurance against process exit without uninitializePlugin (e.g. Maya
+    killed). stop() drains clear+close from inside the worker."""
+    worker = MP_WORKER
+    if worker is not None:
+        try:
+            worker.stop(timeout=1.0)
+        except BaseException:
+            pass
+
+
+atexit.register(_mp_atexit)

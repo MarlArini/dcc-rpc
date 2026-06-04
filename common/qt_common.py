@@ -212,11 +212,11 @@ if QtCore is not None:
             if hasattr(self._prefs, "reset"):
                 self._prefs.reset()
             self._building = True
-            self._load_from_prefs()
+            self.load_from_prefs()
             self._building = False
             self._refresh()
 
-        def _load_from_prefs(self):
+        def load_from_prefs(self):
             for f in fields(self._prefs):
                 if f.metadata.get("group") is None:
                     continue
@@ -294,7 +294,7 @@ if QtCore is not None:
             try:
                 with open(self._path, "r", encoding="utf-8") as prefs_fp:
                     prefs_json = json.load(prefs_fp)
-            except (OSError, json.JSONDecodeError):
+            except (OSError, json.JSONDecodeError):  # fmt: skip
                 self._load_warn()
                 return
             for f in fields(self):
@@ -484,13 +484,36 @@ if QtCore is not None:
                 self.update_presence()
             self.timer.refresh()
 
-        def make_qt_window(self, app_name, parent):
-            self.settings_window = QtSettingsGUIMenu(
+        def _make_qt_window(
+            self,
+            app_name,
+            parent,
+            window_class: type[QtSettingsGUIMenu] = QtSettingsGUIMenu,
+        ):
+            self.settings_window = window_class(
                 prefs=self.prefs,
                 refresh_func=self.on_settings_change,
                 app_name=app_name,
                 parent=parent,
             )
+
+        def show_qt_window(
+            self,
+            app_name,
+            parent,
+            window_class: type[QtSettingsGUIMenu] = QtSettingsGUIMenu,
+        ):
+            if not self.settings_window:
+                self._make_qt_window(app_name, parent, window_class)
+            if not self.settings_window:
+                self._warn(
+                    f"[{self._app_name.title()}Presence] Could not create settings window"
+                )
+                return
+            self.settings_window.load_from_prefs()
+            self.settings_window.show()
+            self.settings_window.raise_()
+            self.settings_window.activateWindow()
 
 else:
     # Stub assignments so `from common import RPCBasePlugin` still resolves on

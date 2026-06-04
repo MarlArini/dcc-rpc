@@ -469,11 +469,7 @@ class KPExtension(kr.Extension):
         if window is None:
             return
         qwindow = window.qwindow()
-        self._plugin.make_qt_window("Krita", qwindow)
-        if self._plugin.settings_window:
-            self._plugin.settings_window.show()
-            self._plugin.settings_window.raise_()
-            self._plugin.settings_window.activateWindow()
+        self._plugin.show_qt_window("Krita", qwindow)
 
     def createActions(self, window):  # pylint: disable=invalid-name
         if window is None:

@@ -277,11 +277,7 @@ def sp_open_settings_menu():
         main_window := uimgr.getMainWindow()
     ) is None:
         return
-    SP_PLUGIN.make_qt_window("Designer", main_window)
-    if SP_PLUGIN.settings_window:
-        SP_PLUGIN.settings_window.show()
-        SP_PLUGIN.settings_window.raise_()
-        SP_PLUGIN.settings_window.activateWindow()
+    SP_PLUGIN.show_qt_window("Designer", main_window)
 
 
 def sp_pause_presence():
