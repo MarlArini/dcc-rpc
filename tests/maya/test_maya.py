@@ -533,7 +533,37 @@ def test_extension_monitor_count_uses_types_when_pref_enabled(cmds):
         MP_PREFS.countExtensions = snap
 
 
-def test_extension_monitor_count_zero_when_pref_disabled(cmds):
+def test_context_get_light_count_excludes_extensions_when_pref_disabled(cmds):
+    """MPExtensionMonitor.count() now returns the raw count; the
+    `countExtensions` pref gate lives in the call sites in context.py
+    (get_light_count / get_mat_count / get_tex_count). When the pref is
+    off, the extension contribution is skipped — only base Maya lights
+    show up."""
+    cmds.set_state(node_types_by_path={
+        "rendernode/arnold/light": ["aiAreaLight"],
+    })
+    MP_EXTENSIONS.init_engine("Arnold")
+    cmds.set_state(
+        ls_results={
+            ("lights",): ["pointLight1"],                  # 1 base Maya light
+            ("type_multi", ("aiAreaLight",)): ["aiLight1"], # 1 Arnold light
+        }
+    )
+    snap = MP_PREFS.countExtensions
+    MP_PREFS.countExtensions = False
+    try:
+        ctx = MPContext.capture()
+        # Pref off → "1 light", not "2 lights" — the Arnold contribution
+        # is skipped despite the engine being initialized.
+        assert ctx.get_light_count() == "1 light"
+    finally:
+        MP_PREFS.countExtensions = snap
+
+
+def test_extension_monitor_count_unfiltered(cmds):
+    """Direct contract: MPExtensionMonitor.count() returns the raw count
+    regardless of MP_PREFS.countExtensions — the pref-gating is the
+    caller's job, not the monitor's."""
     cmds.set_state(node_types_by_path={
         "rendernode/arnold/light": ["aiAreaLight"],
     })
@@ -543,8 +573,7 @@ def test_extension_monitor_count_zero_when_pref_disabled(cmds):
     snap = MP_PREFS.countExtensions
     MP_PREFS.countExtensions = False
     try:
-        # Pref off => types excluded => count returns 0.
-        assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 0
+        assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 1
     finally:
         MP_PREFS.countExtensions = snap
 
@@ -1136,22 +1165,21 @@ def test_mp_remove_callbacks_idempotent(maya_callbacks_clean):
 # write not a close, so connected stays True on success.)
 # ---------------------------------------------------------------------------
 
-import maya_presence as _mp_module  # noqa: E402
+import maya_presence as _mp_module  # noqa: E402,F401
 from maya_presence import mp_update_presence  # noqa: E402
 
 
-# The RPC-client interaction is owned by an in-process worker that
-# mp_update_presence reaches via _get_worker() — which reads the canonical
-# worker reference from `builtins.__mayapresence_worker__`. That indirection
-# exists because Maya's plug-in loader can create more than one copy of
-# maya_presence's module namespace (the MEL render hooks' `import
-# maya_presence` doesn't get cached in sys.modules), so we can't rely on
-# module-level MP_WORKER being non-None in every caller's namespace.
+# The RPC client lives on a daemon thread whose reference is stored at
+# mayapresence_util.shared_state.MP_WORKER. All readers reach it via
+# shared_state._get_worker(). Because shared_state is a submodule under
+# a regular Python package, it goes through normal import machinery and
+# is sys.modules-cached — every importer converges on the same module
+# instance and the same MP_WORKER value. (This used to require a
+# builtins-stash workaround when MP_WORKER lived in maya_presence.py,
+# which Maya's plug-in loader doesn't register in sys.modules; the
+# submodule split made that workaround unnecessary.)
 #
-# These tests install a fake worker into builtins for the duration of the
-# test, then assert against the publishes it recorded.
-
-import builtins as _builtins  # noqa: E402
+# Tests swap MP_WORKER on shared_state for a recording fake.
 
 
 class _FakeWorker:
@@ -1183,25 +1211,14 @@ class _FakeWorker:
 
 @pytest.fixture
 def fake_worker(monkeypatch):
-    """Swap the canonical worker (on builtins) and the module-level
-    MP_WORKER for a recording fake. Both reads (the _get_worker() path
-    and any direct module references) resolve to the fake during the
-    test, and the previous value (if any) is restored on teardown."""
+    """Swap the canonical worker (in shared_state) for a recording fake.
+    All readers go through shared_state._get_worker(), which returns the
+    module-level shared_state.MP_WORKER — monkeypatch handles the
+    teardown automatically."""
+    from mayapresence_util import shared_state  # noqa: PLC0415
     fw = _FakeWorker()
-    attr = _mp_module.MP_WORKER_ATTR
-    had_prior = hasattr(_builtins, attr)
-    prior = getattr(_builtins, attr, None) if had_prior else None
-    setattr(_builtins, attr, fw)
-    monkeypatch.setattr(_mp_module, "MP_WORKER", fw)
+    monkeypatch.setattr(shared_state, "MP_WORKER", fw)
     yield fw
-    # Restore builtins state (monkeypatch handles the module attribute).
-    if had_prior:
-        setattr(_builtins, attr, prior)
-    else:
-        try:
-            delattr(_builtins, attr)
-        except AttributeError:
-            pass
 
 
 def test_update_presence_always_publishes_details(cmds, maya_globals_clean, fake_worker):
@@ -1236,45 +1253,26 @@ def test_update_presence_enabled_publishes_details(cmds, maya_globals_clean, fak
 def test_update_presence_handles_missing_worker(cmds, maya_globals_clean, monkeypatch):
     """If the canonical worker is unset (plugin not started yet, or torn
     down), mp_update_presence must not crash — just compose-and-skip."""
-    attr = _mp_module.MP_WORKER_ATTR
-    had_prior = hasattr(_builtins, attr)
-    prior = getattr(_builtins, attr, None) if had_prior else None
-    if had_prior:
-        delattr(_builtins, attr)
-    monkeypatch.setattr(_mp_module, "MP_WORKER", None)
-    try:
-        MP_PREFS.generalEnable = True
-        mp_update_presence()  # should not raise
-    finally:
-        if had_prior:
-            setattr(_builtins, attr, prior)
+    from mayapresence_util import shared_state  # noqa: PLC0415
+    monkeypatch.setattr(shared_state, "MP_WORKER", None)
+    MP_PREFS.generalEnable = True
+    mp_update_presence()  # should not raise
 
 
-def test_update_presence_reads_worker_from_builtins(cmds, maya_globals_clean,
-                                                    monkeypatch):
-    """Dual-module guarantee: mp_update_presence MUST read the worker
-    from the builtins-stash, not from the module-level MP_WORKER, so a
-    MEL-imported duplicate of maya_presence (which has MP_WORKER=None)
-    still publishes to the original module's worker."""
+def test_update_presence_reads_worker_from_shared_state(cmds, maya_globals_clean,
+                                                        monkeypatch):
+    """Dual-module guarantee: every caller reaches the worker through
+    shared_state.MP_WORKER (accessed via shared_state._get_worker), not
+    through a per-module top-level shadow. A duplicate top-level
+    maya_presence module would still pull from this same shared_state
+    submodule because sys.modules caches the package, so writes to
+    shared_state.MP_WORKER are visible everywhere."""
+    from mayapresence_util import shared_state  # noqa: PLC0415
     fw = _FakeWorker()
-    attr = _mp_module.MP_WORKER_ATTR
-    had_prior = hasattr(_builtins, attr)
-    prior = getattr(_builtins, attr, None) if had_prior else None
-    setattr(_builtins, attr, fw)
-    # Simulate the duplicate module having a None module-level MP_WORKER.
-    monkeypatch.setattr(_mp_module, "MP_WORKER", None)
-    try:
-        MP_PREFS.generalEnable = True
-        mp_update_presence()
-        assert fw.last_publish_enable is True
-    finally:
-        if had_prior:
-            setattr(_builtins, attr, prior)
-        else:
-            try:
-                delattr(_builtins, attr)
-            except AttributeError:
-                pass
+    monkeypatch.setattr(shared_state, "MP_WORKER", fw)
+    MP_PREFS.generalEnable = True
+    mp_update_presence()
+    assert fw.last_publish_enable is True
 
 
 # Note: the previous build_payload tests were removed when _build_payload
@@ -1283,17 +1281,24 @@ def test_update_presence_reads_worker_from_builtins(cmds, maya_globals_clean,
 # substitution. That behavior is covered by tests in tests/common.
 
 
-def test_shared_state_across_module_copies():
-    """Dual-module guarantee for prefs/session/details: a second import
-    of maya_presence should observe the same canonical instances on
-    builtins. We can't actually import a duplicate module in-process
-    (sys.modules caches the first one) — but we can verify the stash
-    contract: the module-level names ARE the builtins-stashed instances."""
-    import builtins as _b  # noqa: PLC0415
+def test_shared_state_module_is_singleton():
+    """Dual-module guarantee: shared_state lives under mayapresence_util,
+    so it goes through Python's normal import machinery and is cached in
+    sys.modules. That means every import path resolves to the SAME
+    module instance — and therefore the same MP_PREFS / MP_SESSION /
+    MP_UPDATE_DETAILS / MP_WORKER objects — regardless of how many
+    copies of the top-level maya_presence module exist in memory."""
+    import sys  # noqa: PLC0415
+    import mayapresence_util.shared_state as direct  # noqa: PLC0415
+    from mayapresence_util import shared_state as via_pkg  # noqa: PLC0415
+    assert direct is via_pkg
+    assert direct is sys.modules["mayapresence_util.shared_state"]
+    # And the module-level globals are the same objects regardless of
+    # which import path was used to reach them.
     import maya_presence as _mp  # noqa: PLC0415
-    assert _mp.MP_PREFS is getattr(_b, _mp.MP_PREFS_ATTR)
-    assert _mp.MP_SESSION is getattr(_b, _mp.MP_SESSION_ATTR)
-    assert _mp.MP_UPDATE_DETAILS is getattr(_b, _mp.MP_UPDATE_DETAILS_ATTR)
+    assert _mp.MP_PREFS is direct.MP_PREFS
+    assert _mp.MP_SESSION is direct.MP_SESSION
+    assert _mp.MP_UPDATE_DETAILS is direct.MP_UPDATE_DETAILS
 
 
 def test_get_gpu_str_no_slash_preserves_full_name(cmds):
@@ -1334,12 +1339,28 @@ def test_uninstall_render_handlers_skips_empty_attrs_correctly(cmds):
 
 
 def test_check_render_handlers_installed_continues_past_runtimeerror(cmds):
+    """When one attr raises (e.g. a renderer node went away mid-session),
+    the check shouldn't crash. With the new "all installed-or-absent"
+    semantics, a RuntimeError is treated as "absent" — counted as OK —
+    so as long as the remaining sites have the fragment, check returns
+    True."""
+    fragment = f"{MP_HOOK_START} python(\"pass\") /* MayaPresence:Hook:End */"
     cmds.set_state(
         attrs={
             **cmds.get_state().attrs,
-            "defaultRenderGlobals.postMel":
-                f"{MP_HOOK_START} python(\"pass\") /* MayaPresence:Hook:End */",
+            "defaultRenderGlobals.postMel": fragment,
+            "defaultRenderGlobals.postRenderMel": fragment,
+            # defaultRenderGlobals.preMel raises (in attrs_raise below).
         },
-        attrs_raise={"defaultRenderGlobals.preMel"},
+        attrs_raise={
+            "defaultRenderGlobals.preMel",
+            # In real Maya, querying an absent node's attrs raises. The
+            # fake getAttr returns None for missing attrs by default, so
+            # we explicitly mark the redshiftOptions sites as raising
+            # (Redshift isn't loaded → its options node doesn't exist).
+            "redshiftOptions.preRenderMel",
+            "redshiftOptions.postRenderMel",
+            "redshiftOptions.postRenderFrameMel",
+        },
     )
     assert mp_check_render_handlers_installed() is True
