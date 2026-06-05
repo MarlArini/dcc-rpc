@@ -323,7 +323,7 @@ def test_load_from_prefs_pushes_values_into_widgets(dialog, prefs):
     prefs.detailsType = "frame"
 
     dialog._building = True  # mirror _on_reset_clicked's pattern
-    dialog._load_from_prefs()
+    dialog.load_from_prefs()
     dialog._building = False
 
     assert dialog._gui_widgets["generalEnable"].isChecked() is False
@@ -337,7 +337,7 @@ def test_load_from_prefs_unknown_choice_falls_to_index_zero(dialog, prefs):
     falls back to index 0."""
     prefs.detailsType = "totally_invented"
     dialog._building = True
-    dialog._load_from_prefs()
+    dialog.load_from_prefs()
     dialog._building = False
     cb = dialog._gui_widgets["detailsType"]
     assert cb.currentIndex() == 0
