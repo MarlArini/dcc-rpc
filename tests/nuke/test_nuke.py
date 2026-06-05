@@ -97,7 +97,7 @@ def test_get_memory_usage(nk, byts, expected_unit):
 def test_get_frame(nk, f):
     nk.set_state(frame_value=f)
     ctx = NKContext()
-    assert ctx.get_frame() == f
+    assert ctx.get_frame_info() == f"Frame {f} (24.0fps)"
 
 
 @pytest.mark.parametrize("start, end", [(1, 100), (101, 250), (0, 0)])
@@ -524,7 +524,6 @@ def test_update_presence_details_rendering_branch(nk, nuke_globals_clean):
     out = NK_UPDATE_DETAILS.details_text
     assert "Rendering" in out
     assert "comp01.nk" in out
-    assert "Frame 1 of 100" in out
 
 
 # ---------------------------------------------------------------------------

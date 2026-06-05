@@ -80,11 +80,12 @@ def format_render_details(
     file_name: str | None = None,
     res: tuple[int, int] | None = None,
     rendered_frames: int | None = None,
-    total_frames: int | None = None,
-    fps: float | int | None = None,
     prefs: RenderSettings = RenderSettings(),
 ) -> str:
-    """Format rendering details string using a concat-join approach."""
+    """Format rendering details string using a concat-join approach. Frame range
+    is not included since most applications (Maya, Nuke) have multiple ways to
+    execute a render and it is not possible to determine the frame range being
+    rendered accurately."""
     parts = ["Rendering"]
 
     if file_name and prefs.displayFileName:
@@ -94,18 +95,8 @@ def format_render_details(
     if res is not None and prefs.displayRenderStats:
         stats.append(f"{res[0]}x{res[1]}")
 
-    frame_fps = []
-    if prefs.displayFrames and total_frames:
-        if rendered_frames is not None:
-            frame_fps.append(f"Frame {rendered_frames} of {total_frames}")
-        else:
-            frame_fps.append(f"{total_frames} frames")
-
-    if fps is not None:
-        frame_fps.append(f"@{fps}fps")
-
-    if frame_fps:
-        stats.append(" ".join(frame_fps))
+    if prefs.displayFrames and rendered_frames:
+        stats.append(f"Frame {rendered_frames}")
 
     if stats:
         return " ".join(parts) + ": " + ", ".join(stats)

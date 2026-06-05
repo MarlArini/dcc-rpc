@@ -127,9 +127,6 @@ class MPContext:
             )
         return mp_plural(textures, "texture")
 
-    def get_current_frame(self) -> str:
-        return f"Frame {int(cmds.currentTime(query=True))}"
-
     def get_file_size(self) -> str | None:
         p = cast(str, cmds.file(query=True, sceneName=True))
         if p and os.path.exists(p):
@@ -163,12 +160,6 @@ class MPContext:
             return mp_render_map[i]
         return i if i else "Unknown"
 
-    def get_frame_range(self) -> Tuple[int, int]:
-        start = int(cmds.playbackOptions(query=True, minTime=True))
-        end = int(cmds.playbackOptions(query=True, maxTime=True))
-        cursor = int(cmds.currentTime(query=True))
-        return (cursor - start + 1, end - start + 1)
-
     def get_active_object(self) -> str | None:
         sel = cmds.ls(selection=True) or []
         return sel[0] if sel else None
@@ -182,7 +173,7 @@ class MPContext:
         except RuntimeError:
             return None
 
-    def get_render_fps(self) -> int | None:
+    def get_fps(self) -> int | None:
         try:
             u = cast(str, cmds.currentUnit(query=True, time=True)) or ""
         except RuntimeError:
@@ -197,6 +188,10 @@ class MPContext:
             except ValueError:
                 return None
         return 24
+
+    def get_current_frame(self) -> str:
+        fps = self.get_fps()
+        return f"Frame {int(cmds.currentTime(query=True))} ({fps}fps)"
 
     def get_user_context(self) -> str | None:
         current_ctx = cmds.currentCtx()

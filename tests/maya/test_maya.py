@@ -219,14 +219,7 @@ def test_display_types_all_lambdas_callable_against_default_ctx(cmds):
 def test_get_current_frame(cmds):
     cmds.set_state(current_time=42.0)
     ctx = MPContext.capture()
-    assert ctx.get_current_frame() == "Frame 42"
-
-
-def test_get_frame_range(cmds):
-    cmds.set_state(min_time=10.0, max_time=110.0, current_time=15.0)
-    ctx = MPContext.capture()
-    # Plugin returns (cursor - start + 1, end - start + 1) - so 6 of 101.
-    assert ctx.get_frame_range() == (6, 101)
+    assert ctx.get_current_frame() == "Frame 42 (24fps)"
 
 
 @pytest.mark.parametrize("renderer, expected", [
@@ -274,13 +267,13 @@ def test_get_render_resolution_raises_returns_none(cmds):
 def test_get_render_fps_known_units(cmds, unit, expected):
     cmds.set_state(current_time_unit=unit)
     ctx = MPContext.capture()
-    assert ctx.get_render_fps() == expected
+    assert ctx.get_fps() == expected
 
 
 def test_get_render_fps_bad_fps_returns_none(cmds):
     cmds.set_state(current_time_unit="bogusfps")
     ctx = MPContext.capture()
-    assert ctx.get_render_fps() is None
+    assert ctx.get_fps() is None
 
 
 # ---------------------------------------------------------------------------
@@ -878,14 +871,14 @@ def test_get_render_fps_unknown_unit_returns_24(cmds):
     falls through to the final `return 24` line."""
     cmds.set_state(current_time_unit="freeform")  # not a preset, no "fps" suffix
     ctx = MPContext.capture()
-    assert ctx.get_render_fps() == 24
+    assert ctx.get_fps() == 24
 
 
 def test_get_render_fps_runtimeerror_returns_24(cmds):
     """If currentUnit raises (no current unit), return 24 as a safe default."""
     cmds.set_state(current_time_unit="")  # empty -> fake raises RuntimeError
     ctx = MPContext.capture()
-    assert ctx.get_render_fps() == 24
+    assert ctx.get_fps() == 24
 
 
 def test_update_presence_details_rendering_branch(cmds, maya_globals_clean):
@@ -914,8 +907,7 @@ def test_update_presence_details_rendering_branch(cmds, maya_globals_clean):
     assert "Rendering" in out
     assert "scene01" in out
     assert "1920x1080" in out
-    assert "Frame 17 of 101" in out
-    assert "24fps" in out
+    assert "Frame 17" in out
 
 
 def test_update_presence_details_non_rendering_uses_update_slot(cmds, maya_globals_clean):

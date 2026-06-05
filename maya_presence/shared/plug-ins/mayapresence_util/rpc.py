@@ -121,15 +121,11 @@ def mp_update_presence_details(ctx: MPContext):
     if MP_PREFS.enableDetails and MP_SESSION.is_rendering:
         res = ctx.get_render_resolution()
         fname = ctx.get_file_name()
-        frame_range = ctx.get_frame_range()
-        fps = ctx.get_render_fps()
         MP_UPDATE_DETAILS.details_text = format_render_details(
             file_name=fname,
             res=res,
             rendered_frames=MP_SESSION.rendered_frames,
-            total_frames=frame_range[1],
-            fps=fps,
-            prefs=MP_PREFS,
+            prefs=MP_PREFS
         )
     elif MP_PREFS.enableDetails:
         update_slot(

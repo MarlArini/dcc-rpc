@@ -60,6 +60,7 @@ class NKSettings(SharedSettings, JSONSharedSettings):
         ("Active node (commercial)", "active_node"),
         ("Read/write node count (commercial)", "io_nodes"),
         ("Layer count", "num_layers"),
+        ("Frame info", "frame"),
         ("Viewer info (commercial)", "viewer_info"),
         ("Color management", "color_management"),
         ("Comp name", "comp_name"),
@@ -153,9 +154,6 @@ class NKContext:
     def get_memory_usage(self) -> str:
         mem_bytes = nuke.memory2.usage()
         return f"Using {get_file_size_str(mem_bytes)} of memory"
-
-    def get_frame(self) -> int:
-        return nuke.frame()
 
     def get_frame_range(self) -> Tuple[int, int]:
         frame_range = nuke.root().frameRange()
@@ -271,6 +269,10 @@ class NKContext:
                 return f"Downrez 1/{downrez}"
         return None
 
+    def get_frame_info(self) -> str:
+        frame = nuke.frame()
+        fps = self.get_fps()
+        return f"Frame {frame} ({fps}fps)"
 
 #######
 # RPC #
@@ -328,6 +330,7 @@ NK_DISPLAY_TYPES = {
     "active_node": nk_handle_active_node,
     "io_nodes": lambda ctx: ctx.get_io_nodes(),
     "num_layers": lambda ctx: ctx.get_num_layers(),
+    "frame": lambda ctx: ctx.get_frame_info(),
     "viewer_info": lambda ctx: ctx.get_viewer_str(),
     "color_management": lambda ctx: ctx.get_color_management(),
     "comp_name": lambda ctx: ctx.get_comp_name(),
@@ -344,11 +347,9 @@ def nk_update_presence_details(ctx):
     # Rendering Details
     if NK_PREFS.enableDetails and NK_SESSION.is_rendering:
         fname = ctx.get_comp_name()
-        frame_range = ctx.get_frame_range()
         NK_UPDATE_DETAILS.details_text = format_render_details(
             file_name=fname,
-            rendered_frames=frame_range[0],
-            total_frames=frame_range[1],
+            rendered_frames=NK_SESSION.rendered_frames,
             prefs=RenderSettings(
                 displayRenderStats=NK_PREFS.displayRenderStats,
                 displayFileName=NK_PREFS.displayFileName,
