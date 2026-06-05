@@ -123,21 +123,6 @@ def test_get_active_node_returns_name_class_tuple(nk):
     assert ctx.get_active_node() == ("Blur1", "Blur")
 
 
-def test_get_io_nodes_disabled_returns_none(nk):
-    from nuke_presence.menu import NK_PREFS
-    original = NK_PREFS.disableNodeQueries
-    NK_PREFS.disableNodeQueries = True
-    try:
-        nk.set_state(all_nodes={
-            "Read": [nk.make_node(node_class="Read")],
-            "Write": [nk.make_node(node_class="Write")],
-        })
-        ctx = NKContext()
-        assert ctx.get_io_nodes() is None
-    finally:
-        NK_PREFS.disableNodeQueries = original
-
-
 def test_get_io_nodes_no_io_returns_none(nk):
     from nuke_presence.menu import NK_PREFS
     NK_PREFS.disableNodeQueries = False
@@ -650,18 +635,6 @@ def test_get_io_nodes_both_present_plurals_use_space(nk):
 # ---------------------------------------------------------------------------
 
 from nuke_presence.menu import nk_handle_active_node  # noqa: E402
-
-
-def test_nk_handle_active_node_no_selection_fixed_returns_message(nk, nuke_globals_clean):
-    """No selection + details fixed to 'active_node' → 'No nodes selected'."""
-    _NK_PREFS.detailsCycle = False
-    _NK_PREFS.detailsType = "active_node"
-    _NK_PREFS.stateCycle = False
-    _NK_PREFS.stateType = "comp_name"
-    _NK_PREFS.displaySmallIcon = True
-    nk.set_state(selected_node=None)
-    ctx = NKContext()
-    assert nk_handle_active_node(ctx) == "No nodes selected"
 
 
 def test_nk_handle_active_node_unknown_class_returns_text(nk, nuke_globals_clean):

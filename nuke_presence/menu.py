@@ -36,7 +36,7 @@ from common import (
     advance_cycle,
     update_slot,
     format_render_details,
-    DISCORD_SHORT_TERM_RATE_LIMIT
+    DISCORD_SHORT_TERM_RATE_LIMIT,
 )
 
 # Bootstrap: ensure this plugin's directory is on sys.path so the sibling
@@ -57,10 +57,10 @@ class NKSettings(SharedSettings, JSONSharedSettings):
     INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
         ("Memory usage", "memory_usage"),
         ("Node count", "num_nodes"),
-        ("Active node", "active_node"),
-        ("Read/write node count", "io_nodes"),
+        ("Active node (commercial)", "active_node"),
+        ("Read/write node count (commercial)", "io_nodes"),
         ("Layer count", "num_layers"),
-        ("Viewer info", "viewer_info"),
+        ("Viewer info (commercial)", "viewer_info"),
         ("Color management", "color_management"),
         ("Comp name", "comp_name"),
         ("Format", "format"),
@@ -82,10 +82,16 @@ class NKSettings(SharedSettings, JSONSharedSettings):
         default=True,
         metadata={"group": "Details", "label": "Display frames rendered in details"},
     )
-    disableNodeQueries: bool = field(
-        default=True,
-        metadata={"group": "General", "label": "Disable querying nodes"},
-    )
+
+
+# This plugin was originally written based on a misreading of the Non-commercial and
+# Indie Python API restrictions, in which I believed it was possible to repeatedly
+# query nodes but that only the first 10 results to any query would be returned. Thus
+# there are methods throughout the file to find the selected node and display its icon
+# or to query the node being viewed in a Viewer. However, a Non-commercial or Indie user
+# can only query 10 nodes throughout the entire lifetime of a Nuke session. Thus all of
+# the node-related code has been temporarily turned into string statements until/unless
+# the API is updated such that it allows more than 10 node queries.
 
 
 # pylint: disable=line-too-long
@@ -156,7 +162,7 @@ class NKContext:
         return (frame_range.first(), frame_range.last())
 
     def get_active_node(self) -> Tuple[str, str] | None:
-        if NK_PREFS.disableNodeQueries:
+        if not NK_IS_COMMERCIAL:
             return None
         try:
             active_node = nuke.selectedNode()
@@ -178,7 +184,7 @@ class NKContext:
         return nk_plural(nodes, "node")
 
     def get_io_nodes(self) -> str | None:
-        if NK_PREFS.disableNodeQueries:
+        if not NK_IS_COMMERCIAL:
             return None
         read_nodes = nuke.allNodes("Read")
         write_nodes = nuke.allNodes("Write")
@@ -206,7 +212,7 @@ class NKContext:
         """Construct a string representing the viewing context: the node
         being viewed through the viewer, the channel being viewed, and the
         viewer process (if not sRGB)"""
-        if NK_PREFS.disableNodeQueries:
+        if not NK_IS_COMMERCIAL:
             return None
         viewer = nuke.activeViewer()
         if viewer is None:
@@ -250,14 +256,20 @@ class NKContext:
             proxy = root["proxy_scale"].value()
         else:
             proxy = 1
-        if viewer is not None:
-            downrez = viewer.node()["downrez"].value()
-        else:
-            downrez = 1
-        if proxy != 1 or downrez != 1:
-            return f"Proxy {proxy}x, downrez 1/{downrez}"
-        else:
-            return None
+        if not NK_IS_COMMERCIAL and proxy != 1:
+            return f"Proxy {proxy}x"
+        elif NK_IS_COMMERCIAL:
+            if viewer is not None:
+                downrez = viewer.node()["downrez"].value()
+            else:
+                downrez = 1
+            if proxy != 1 and downrez != 1:
+                return f"Proxy {proxy}x | Downrez 1/{downrez}"
+            elif proxy != 1:
+                return f"Proxy {proxy}x"
+            elif downrez != 1:
+                return f"Downrez 1/{downrez}"
+        return None
 
 
 #######
@@ -273,6 +285,8 @@ def nk_update_large_icon(ctx: NKContext):
 def nk_update_small_icon(ctx: NKContext):
     NK_UPDATE_DETAILS.small_icon = None
     NK_UPDATE_DETAILS.small_icon_text = ""
+    if not NK_IS_COMMERCIAL:
+        return
     if NK_PREFS.displaySmallIcon:
         res = ctx.get_active_node()
         if res is not None:
@@ -284,6 +298,8 @@ def nk_update_small_icon(ctx: NKContext):
 
 def nk_handle_active_node(ctx: NKContext) -> str | None:
     node = ctx.get_active_node()
+    if node is None:  # get_active_node returns None on non-commercial/indie
+        return
     if (
         (  # User has set details or state to a fixed 'active node' display
             not NK_PREFS.detailsCycle
@@ -369,9 +385,11 @@ def nk_update_presence():
             nuke.warning(f"[NukePresence] clear failed: {e}")
             NK_SESSION.connected = False
 
+
 def nk_on_setting_change():
     if time.time() - NK_SESSION.last_update > DISCORD_SHORT_TERM_RATE_LIMIT:
         nk_update_presence()
+
 
 #############
 # Threading #
@@ -491,7 +509,7 @@ NK_WORKER = NKBackgroundWorker()
 NK_PREFS.setup_persistence(
     path=os.path.join(os.path.expanduser("~/.nuke"), "nuke_presence_preferences.json"),
     app_name="nuke",
-    warn=nuke.warning
+    warn=nuke.warning,
 )
 NK_MENU = NKMenu(NK_PREFS, NK_WORKER)
 NK_WORKER.start()
