@@ -473,7 +473,7 @@ GP_RPC_CLIENT = Presence("1510363090724720681")
 def gp_update_small_icon(ctx: GPContext):  # pylint: disable=unused-argument
     GP_DETAILS.small_icon = None
     GP_DETAILS.small_icon_text = ""
-    if GP_PREFS.enableColoredIcons:
+    if GP_PREFS.enableColoredIcons and GP_PREFS.displaySmallIcon:
         color = ctx.foreground_color()
         closest = gp_find_closest_color(color, GP_PREFS.useEvocativeNames)
         GP_DETAILS.small_icon = f"paintbrush_{closest.icon_key_suffix}"

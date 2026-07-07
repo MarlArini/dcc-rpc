@@ -10,7 +10,7 @@ from enum import auto, IntEnum
 import os
 import sys
 import time
-from typing import Any, ClassVar, Dict, List, Tuple
+from typing import Any, ClassVar, Dict, List, Set, Tuple
 from pathlib import Path
 
 import c4d  # pylint: disable=import-error
@@ -269,7 +269,9 @@ class C4DPSettings(SharedSettings, RenderSettings):
 
 
 class C4DPSession(SessionInfo):
-    render_is_animated: bool = False
+    render_res: Tuple[int, int] = (0,0)
+    render_engine: str = ""
+    rendering_doc: str = ""
 
 
 C4DP_PREFS = C4DPSettings()
@@ -376,12 +378,6 @@ class C4DContext:
         spaces = self.document.GetActiveOcioColorSpacesNames()
         return f"{spaces[1]} ({spaces[2]})"
 
-    def get_current_frame(self) -> str:
-        current_time = self.document.GetTime()
-        fps = self.get_fps()
-        frame = current_time.GetFrame(fps)
-        return f"Frame {frame}"
-
     def get_file_size(self) -> str | None:
         file_path = self.document.GetDocumentPath()
         if not file_path:
@@ -401,30 +397,18 @@ class C4DContext:
             release = release // 10
         return f"{year}.{str(release)}"
 
-    def get_render_engine_str(self) -> str:
-        render_info = self.document.GetActiveRenderData()
-        engine_id = render_info[c4d.RDATA_RENDERENGINE]
-        if (engine := _C4D_RENDER_ENGINES.get(engine_id, None)) is not None:
-            return engine
-        return "Unknown render engine"
-
-    def get_frame_range(self) -> Tuple[int, int]:
-        fps = self.get_fps()
-        min_time = self.document.GetMinTime()
-        max_time = self.document.GetMaxTime()
-        return (min_time.GetFrame(fps), max_time.GetFrame(fps))
-
     def get_active_object(self) -> str | None:
         obj = self.document.GetActiveObject()
         return f"Active: {obj.GetName()}" if obj else None
 
-    def get_render_resolution(self) -> Tuple[int, int] | None:
-        render_info = self.document.GetActiveRenderData()
-        res_info = render_info.GetResolution()
-        return (res_info[0], res_info[1])
-
     def get_fps(self) -> int | None:
         return self.document.GetFps()
+
+    def get_current_frame(self) -> str:
+        current_time = self.document.GetTime()
+        fps = self.get_fps()
+        frame = current_time.GetFrame(fps)
+        return f"Frame {frame} ({fps}fps)"
 
 
 #################
@@ -457,7 +441,7 @@ def c4d_update_small_icon(ctx: C4DContext):
         if C4DP_PREFS.displayEngine and C4DP_SESSION.is_rendering:
             # No icons for Viewport / Standard / Physical
             engines = ["Arnold", "Redshift", "V-Ray", "Octane"]
-            current_engine = ctx.get_render_engine_str()
+            current_engine = C4DP_SESSION.render_engine
             if current_engine in engines:
                 icon_file_name = current_engine.lower().replace("-", "")
                 icon_text = current_engine
@@ -495,16 +479,12 @@ C4DP_DISPLAY_TYPES = {
 def c4d_update_presence_details(ctx: C4DContext):
     # Rendering Details
     if C4DP_PREFS.enableDetails and C4DP_SESSION.is_rendering:
-        res = ctx.get_render_resolution()
-        fname = ctx.get_document_name()
-        frame_range = ctx.get_frame_range()
-        fps = ctx.get_fps()
+        res = C4DP_SESSION.render_res
+        fname = C4DP_SESSION.rendering_doc
         C4DP_UPDATE_DETAILS.details_text = format_render_details(
             file_name=fname,
             res=res,
             rendered_frames=C4DP_SESSION.rendered_frames,
-            total_frames=frame_range[1],
-            fps=fps,
             prefs=C4DP_PREFS,
         )
     elif C4DP_PREFS.enableDetails:
@@ -669,23 +649,6 @@ class C4DPresencePrefs(c4d.plugins.PreferenceData):
             if data["id"][0].id == C4DP.C4DPRESENCE_RESETALL:  # pyright: ignore[reportIndexIssue]
                 _reset_prefs(self.GetBaseContainer())
                 return True
-        if type == c4d.MSG_MULTI_RENDERNOTIFICATION:
-            c4d.WriteConsole("Render notification caught")
-            is_start = data["start"]  # pyright: ignore[reportIndexIssue]
-            is_animated = data["animated"]  # pyright: ignore[reportIndexIssue]
-            if is_start:
-                C4DP_SESSION.is_rendering = True
-                C4DP_SESSION.render_is_animated = is_animated
-            else:
-                C4DP_SESSION.is_rendering = False
-        if type == c4d.MSG_DOCUMENTINFO:
-            c4d.WriteConsole("Document notification caught")
-            info_type = data["type"]  # pyright: ignore[reportIndexIssue]
-            if (
-                info_type == c4d.MSG_DOCUMENTINFO_TYPE_LOAD
-                or info_type == c4d.MSG_DOCUMENTINFO_TYPE_NEWPROJECT_AFTER
-            ) and C4DP_PREFS.resetTimer:
-                C4DP_SESSION.start_time = time.time()
         return True
 
 
@@ -699,16 +662,50 @@ class C4DPPresenceMessage(c4d.plugins.MessageData):
     timer every 1000ms and checks whether enough time has elapsed since the
     last update to do another one. This also means there's no need for a special
     handler for settings updates where the generalUpdate rate is changed, since
-    the settings are effectively checked every second."""
+    the settings are effectively checked every second. The active document is also
+    polled here, with a set of documents maintained to implement the reset timer
+    functionality of the plugin since CoreMessage does not get MSG_DOCUMENTINFO
+    messages; the render state of the application is polled for the same reason."""
 
     # pylint: disable=invalid-name, unused-argument, redefined-builtin
     last_update: float = time.time()
+    seen_documents: Set[c4d.documents.BaseDocument] = set()
 
     def GetTimer(self) -> int:
         return 1000
 
     def CoreMessage(self, id: int, bc: c4d.BaseContainer) -> bool:
         if id == c4d.MSG_TIMER:
+            # Poll active document
+            if (doc := c4d.documents.GetActiveDocument()) not in self.seen_documents:
+                self.seen_documents.add(doc)
+                if C4DP_PREFS.resetTimer:
+                    C4DP_SESSION.start_time = time.time()
+            # Poll render start
+            if not C4DP_SESSION.is_rendering and (
+                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EDITORRENDERING) or \
+                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EXTERNALRENDERING)
+            ):
+                # Is rendering
+                C4DP_SESSION.is_rendering = True
+                # Get document name
+                C4DP_SESSION.rendering_doc = doc.GetDocumentName()
+                # Get document render data
+                render_info = doc.GetActiveRenderData()
+                # Get resolution
+                res_info = render_info.GetResolution()
+                C4DP_SESSION.render_res = (int(res_info[0]), int(res_info[1]))
+                # Get engine
+                e_id = render_info[c4d.RDATA_RENDERENGINE]
+                C4DP_SESSION.render_engine = _C4D_RENDER_ENGINES.get(e_id, "Unknown render engine")
+            # Poll render stop
+            elif C4DP_SESSION.is_rendering and not (
+                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EDITORRENDERING) or \
+                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EXTERNALRENDERING)
+            ):
+                # No longer rendering
+                C4DP_SESSION.is_rendering = False
+            # Rich Presence update
             t = time.time()
             if t - self.last_update > C4DP_PREFS.generalUpdate:
                 c4d_update_presence()

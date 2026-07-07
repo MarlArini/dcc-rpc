@@ -11,4 +11,5 @@ obj
 bin
 houdini_presence
 .coverage
+.ruff_cache
 docs/

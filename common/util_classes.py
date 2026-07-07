@@ -19,7 +19,7 @@ class SharedSettings:
         default=True, metadata={"group": "General", "label": "Enable RPC Updates"}
     )
     generalUpdate: int = field(
-        default=12,
+        default=15,
         metadata={
             "group": "General",
             "label": "Update interval",
@@ -166,7 +166,7 @@ class RenderSettings:
         metadata={"group": "Details", "label": "Display render stats in details"},
     )
     displayFileName: bool = field(
-        default=False,
+        default=True,
         metadata={"group": "Details", "label": "Display file name when rendering"},
     )
     displayFrames: bool = field(

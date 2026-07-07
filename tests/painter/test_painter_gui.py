@@ -439,7 +439,7 @@ def test_reset_restores_initial_defaults_combobox(dialog, prefs_snapshot, monkey
 
 def test_reset_restores_base_defaults(dialog, prefs_snapshot, monkeypatch):
     """generalUpdate has no _INITIAL_DEFAULTS override, so reset should land
-    on the SharedSettings base default (12)."""
+    on the SharedSettings base default (15)."""
     dialog._gui_widgets["generalUpdate"].setValue(45)
     assert prefs_snapshot.generalUpdate == 45
     monkeypatch.setattr(
@@ -447,8 +447,8 @@ def test_reset_restores_base_defaults(dialog, prefs_snapshot, monkeypatch):
         staticmethod(lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes),
     )
     dialog._on_reset_clicked()
-    assert prefs_snapshot.generalUpdate == 12
-    assert dialog._gui_widgets["generalUpdate"].value() == 12
+    assert prefs_snapshot.generalUpdate == 15
+    assert dialog._gui_widgets["generalUpdate"].value() == 15
 
 
 def test_reset_no_op_when_user_cancels(dialog, prefs_snapshot, monkeypatch):

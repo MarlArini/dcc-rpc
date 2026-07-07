@@ -430,8 +430,8 @@ def test_reset_restores_base_defaults(dialog, prefs_snapshot, monkeypatch):
         staticmethod(lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes),
     )
     dialog._on_reset_clicked()
-    assert prefs_snapshot.generalUpdate == 12
-    assert dialog._gui_widgets["generalUpdate"].value() == 12
+    assert prefs_snapshot.generalUpdate == 15
+    assert dialog._gui_widgets["generalUpdate"].value() == 15
 
 
 def test_reset_no_op_when_user_cancels(dialog, prefs_snapshot, monkeypatch):

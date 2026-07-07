@@ -17,7 +17,7 @@ import pytest
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent.parent
-_MAYA_SOURCE = _REPO / "maya_presence" / "shared" / "plug-ins"
+_MAYA_SOURCE = _REPO / "maya_presence" / "plug-ins"
 
 for path in (_REPO, _MAYA_SOURCE, _HERE):
     p = str(path)

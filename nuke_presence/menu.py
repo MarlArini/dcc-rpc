@@ -428,15 +428,15 @@ class NKBackgroundWorker:
 
 
 def nk_install_render_callbacks():
-    nuke.addBeforeRender(on_render_start, args=(NK_SESSION, NK_PREFS))
+    nuke.addBeforeRender(on_render_start, args=(NK_SESSION,))
     nuke.addAfterFrameRender(on_frame_render_end, args=(NK_SESSION,))
-    nuke.addAfterRender(on_render_end, args=(NK_SESSION, NK_PREFS))
+    nuke.addAfterRender(on_render_end, args=(NK_SESSION,))
 
 
 def nk_uninstall_render_callbacks():
-    nuke.removeBeforeRender(on_render_start, args=(NK_SESSION, NK_PREFS))
+    nuke.removeBeforeRender(on_render_start, args=(NK_SESSION,))
     nuke.removeAfterFrameRender(on_frame_render_end, args=(NK_SESSION,))
-    nuke.removeAfterRender(on_render_end, args=(NK_SESSION, NK_PREFS))
+    nuke.removeAfterRender(on_render_end, args=(NK_SESSION,))
 
 
 #####################

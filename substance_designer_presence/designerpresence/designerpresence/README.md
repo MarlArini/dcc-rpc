@@ -8,7 +8,8 @@ A new 'Discord' dropdown will be added to the toolbar. Click it and select 'Sett
 
 ## Settings & Features
 #### State and Details allow you to choose from:
-- **Project name**: the current package name, including extension: e.g., *'Fabrics.sbs'*. If no packages are open, *'No package open'* is displayed.
+- **Package name**: the current package name, including extension: e.g., *'Fabrics.sbs'*. Unsaved packages will display as 'Unsaved package'; if no packages are open, *'No project open'* is displayed.
+- **Graph name**: the current graph name; if the replaceUnderscores preference is enabled, underscores will be replaced with spaces, e.g., "my_graph_in_designer" -> "my graph in designer"
 - **Active node**: the type of the currently selected node, e.g., *'Uniform color'*.
 - **Node count**: the number of nodes in the current graph, formatted as *'__ node[s]'*.
 - **Output node count**: the number of output nodes in the current graph, formatted as *'__ output node[s]'*.
@@ -16,8 +17,6 @@ A new 'Discord' dropdown will be added to the toolbar. Click it and select 'Sett
 - **Material model**: the material model in use for the graph (if it is not 'Undefined'), e.g., *'OpenPBR v1.1'*.
 - **Resource count**: the total number of resources in the current package, formatted as *'__ resource[s]'*.
 - **Color space**: the color space of the current graph, e.g., *'Color space: sRGB'*.
-TODO update all above
 
 #### Icons
-If you enable small icons, the icon for the node you currently have selected will be displayed, ***IF*** it is an atomic node. 
-(*I could not find a way to get image files for the icons of the non-atomic nodes; even the atomic node icons are from the Designer documentation online and not from the application. If someone knows a way to extract the icons from the application through PySide6 I would be interested; all of the elements that hold icons appear to be in custom opaque QtWidget objects with no children.*)
+If you enable small icons, the icon for the node you currently have selected will be displayed, ***IF*** it is an atomic node. I could not find a way to get image files for the icons of the non-atomic nodes.

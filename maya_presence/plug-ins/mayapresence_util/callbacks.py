@@ -6,8 +6,9 @@ from typing import Set, Tuple
 
 import maya.api.OpenMaya as om  # pyright: ignore[reportMissingImports, reportMissingModuleSource] pylint: disable=import-error
 
-from .shared_state import MP_EXTENSIONS, mp_print, MP_PREFS, MP_SESSION
+from .shared_state import mp_print, MP_PREFS, MP_SESSION
 from .render_hooks import mp_install_render_handlers
+from . import extension_types
 
 
 # Registered om.MSceneMessage IDs, paired with a human-readable name for
@@ -16,27 +17,18 @@ MP_CALLBACKS: Set[Tuple[str, int]] = set()
 
 
 def mp_observe_plugin_load(string_array, clientData):  # pylint: disable=unused-argument,invalid-name
-    """If the loaded plugin was a monitored render engine, populate its type table
-    so the next presence compose can use it."""
-    if not string_array:
-        return
-    # kAfterPluginLoad string array layout is [plugin_path, plugin_name]
-    loaded_plugin_name = string_array[-1]
-    for engine_name, engine in MP_EXTENSIONS.monitored_engines.items():
-        if engine.plugin_name == loaded_plugin_name:
-            MP_EXTENSIONS.init_engine(engine_name)
-            return
+    """Refresh the extension type cache when any plug-in loads.
+
+    The cache is rebuilt unconditionally rather than filtered by plug-in
+    name because cmds.listNodeTypes already returns the union of all
+    loaded engines' types — there's nothing to lose by re-querying it,
+    and we don't need a hard-coded list of "known" render engines."""
+    extension_types.rebuild()
 
 
 def mp_observe_plugin_unload(string_array, clientData):  # pylint: disable=unused-argument,invalid-name
-    """If a monitored render engine was unloaded, stop counting its types."""
-    if not string_array:
-        return
-    # kAfterPluginUnload string array layout is [plugin_name, plugin_path]
-    unloaded_plugin_name = string_array[0]
-    for _name, engine in MP_EXTENSIONS.monitored_engines.items():
-        if engine.plugin_name == unloaded_plugin_name:
-            engine.loaded = False
+    """Refresh the extension type cache when any plug-in unloads."""
+    extension_types.rebuild()
 
 
 def mp_on_file(*args): #pylint: disable=unused-argument

@@ -760,10 +760,10 @@ class TestActiveLayerInfoRegressions:
 
 class TestTimer:
     def test_start_timer_schedules_with_min_1s_interval(self):
-        GP_PREFS.generalUpdate = 12
+        GP_PREFS.generalUpdate = 15
         gp_start_timer()
         assert gp._GP_TIMER_ID is not None
-        assert GLib._last_scheduled_interval() == 12000  # ms
+        assert GLib._last_scheduled_interval() == 15000  # ms
 
     def test_start_timer_clamps_to_minimum_1s(self):
         """generalUpdate=0 should still produce at least 10000ms interval."""

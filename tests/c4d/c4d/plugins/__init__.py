@@ -61,6 +61,9 @@ class MessageData:
     pass
 
 
+class NodeData:
+    pass
+
 def RegisterPreferencePlugin(  # noqa: N802
     id: int,  # noqa: A002
     g: type,

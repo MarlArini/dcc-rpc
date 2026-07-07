@@ -7,8 +7,8 @@ import maya.cmds as cmds  # pyright: ignore[reportMissingImports] pylint: disabl
 
 from common import plural as mp_plural, shorten_number, get_file_size_str
 
-from .shared_state import MP_PREFS, MP_EXTENSIONS
-from .extension_monitor import MPExtensionMonitor
+from .shared_state import MP_PREFS
+from . import extension_types
 
 class MPContext:
     @classmethod
@@ -61,12 +61,11 @@ class MPContext:
         return mp_plural(cams, "camera")
 
     def get_light_count(self) -> str:
-        lights = len(cmds.ls(lights=True))
-        if MP_PREFS.countExtensions:
-            lights += MP_EXTENSIONS.count(
-                MPExtensionMonitor.TypeCategory.LIGHT
-            )
-        return mp_plural(lights, "light")
+        lights = cmds.ls(lights=True) or []
+        if MP_PREFS.countExtensions and extension_types.MP_EXT_LIGHTS:
+            ext_lights = cmds.ls(type=list(extension_types.MP_EXT_LIGHTS)) or []
+            lights = list(set(lights) | set(ext_lights))
+        return mp_plural(len(lights), "light")
 
     def get_mesh_count(self) -> str:
         meshes = cmds.ls(geometry=True, visible=True, noIntermediate=True, type="mesh")
@@ -112,20 +111,18 @@ class MPContext:
         return mp_plural(blendshapes, "blendshape")
 
     def get_mat_count(self) -> str:
-        mats = len(cmds.ls(materials=True))
-        if MP_PREFS.countExtensions:
-            mats += MP_EXTENSIONS.count(
-                MPExtensionMonitor.TypeCategory.MATERIAL
-            )
-        return mp_plural(mats, "material")
+        mats = cmds.ls(materials=True) or []
+        if MP_PREFS.countExtensions and extension_types.MP_EXT_MATERIALS:
+            ext_mats = cmds.ls(type=list(extension_types.MP_EXT_MATERIALS)) or []
+            mats = list(set(mats) | set(ext_mats))
+        return mp_plural(len(mats), "material")
 
     def get_tex_count(self) -> str:
-        textures = len(cmds.ls(textures=True))
-        if MP_PREFS.countExtensions:
-            textures += MP_EXTENSIONS.count(
-                MPExtensionMonitor.TypeCategory.TEXTURE
-            )
-        return mp_plural(textures, "texture")
+        textures = cmds.ls(textures=True) or []
+        if MP_PREFS.countExtensions and extension_types.MP_EXT_TEXTURES:
+            ext_textures = cmds.ls(type=list(extension_types.MP_EXT_TEXTURES)) or []
+            textures = list(set(textures) | set(ext_textures))
+        return mp_plural(len(textures), "texture")
 
     def get_file_size(self) -> str | None:
         p = cast(str, cmds.file(query=True, sceneName=True))

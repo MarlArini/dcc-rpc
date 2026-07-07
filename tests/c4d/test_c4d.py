@@ -300,29 +300,13 @@ def test_get_color_info_formats_spaces(c4d_mod, c4dp):
 def test_get_current_frame_uses_time_and_fps(c4d_mod, c4dp):
     c4d_mod.set_state(active_doc=c4d_mod.make_document(current_time=42, fps=30))
     ctx = c4dp.C4DContext.capture()
-    assert ctx.get_current_frame() == "Frame 42"
-
-
-def test_get_frame_range_returns_min_max(c4d_mod, c4dp):
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(
-        min_frame=0, max_frame=240, fps=24,
-    ))
-    ctx = c4dp.C4DContext.capture()
-    assert ctx.get_frame_range() == (0, 240)
+    assert ctx.get_current_frame() == "Frame 42 (30fps)"
 
 
 def test_get_fps(c4d_mod, c4dp):
     c4d_mod.set_state(active_doc=c4d_mod.make_document(fps=60))
     ctx = c4dp.C4DContext.capture()
     assert ctx.get_fps() == 60
-
-
-def test_get_render_resolution(c4d_mod, c4dp):
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(
-        render_resolution=(3840, 2160),
-    ))
-    ctx = c4dp.C4DContext.capture()
-    assert ctx.get_render_resolution() == (3840, 2160)
 
 
 # ---------------------------------------------------------------------------
@@ -389,38 +373,6 @@ def test_get_gpu_str_returns_none_on_runtime_error(c4d_mod, c4dp):
     assert ctx.get_gpu_str() is None
 
 
-@pytest.mark.parametrize("engine_id, expected", [
-    # Pull the constants off the c4d fake so this stays in sync.
-    ("RDATA_RENDERENGINE_STANDARD", "Standard"),
-    ("RDATA_RENDERENGINE_PHYSICAL", "Physical"),
-    ("RDATA_RENDERENGINE_PREVIEWHARDWARE", "Viewport"),
-    ("RDATA_RENDERENGINE_REDSHIFT", "Redshift"),
-])
-def test_get_render_engine_str_known(c4d_mod, c4dp, engine_id, expected):
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(
-        render_engine=getattr(c4d_mod, engine_id),
-    ))
-    ctx = c4dp.C4DContext.capture()
-    assert ctx.get_render_engine_str() == expected
-
-
-@pytest.mark.parametrize("engine_id, expected", [
-    (1053272, "V-Ray"),
-    (1029525, "Octane"),
-    (1029988, "Arnold"),
-])
-def test_get_render_engine_str_third_party(c4d_mod, c4dp, engine_id, expected):
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(render_engine=engine_id))
-    ctx = c4dp.C4DContext.capture()
-    assert ctx.get_render_engine_str() == expected
-
-
-def test_get_render_engine_str_unknown_returns_unknown(c4d_mod, c4dp):
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(render_engine=9999999))
-    ctx = c4dp.C4DContext.capture()
-    assert ctx.get_render_engine_str() == "Unknown render engine"
-
-
 # ---------------------------------------------------------------------------
 # c4d_update_large_icon
 # ---------------------------------------------------------------------------
@@ -477,9 +429,21 @@ def fresh_prefs(c4dp):
 @pytest.fixture
 def fresh_session(c4dp):
     s = c4dp.C4DP_SESSION
-    snap = (s.is_rendering, s.rendered_frames, s.render_is_animated)
+    snap = (
+        s.is_rendering,
+        s.rendered_frames,
+        s.render_res,
+        s.render_engine,
+        s.rendering_doc,
+    )
     yield s
-    (s.is_rendering, s.rendered_frames, s.render_is_animated) = snap
+    (
+        s.is_rendering,
+        s.rendered_frames,
+        s.render_res,
+        s.render_engine,
+        s.rendering_doc,
+    ) = snap
 
 
 def test_update_large_icon_with_version(c4d_mod, c4dp, fresh_details, fresh_prefs):
@@ -550,9 +514,8 @@ def test_update_small_icon_render_engine_redshift(c4d_mod, c4dp,
     fresh_prefs.displayEngine = True
     fresh_prefs.displayGPU = False
     fresh_session.is_rendering = True
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(
-        render_engine=c4d_mod.RDATA_RENDERENGINE_REDSHIFT,
-    ))
+    fresh_session.render_engine = "Redshift"
+    c4d_mod.set_state(active_doc=c4d_mod.make_document())
     ctx = c4dp.C4DContext.capture()
     c4dp.c4d_update_small_icon(ctx)
     assert fresh_details.small_icon == "redshift"
@@ -566,11 +529,10 @@ def test_update_small_icon_render_engine_with_gpu(c4d_mod, c4dp,
     fresh_prefs.displayEngine = True
     fresh_prefs.displayGPU = True
     fresh_session.is_rendering = True
+    fresh_session.render_engine = "Redshift"
     bc = c4d_mod.BaseContainer()
     bc[c4d_mod.DRAWPORT_RENDERER_NAME] = "RTX 4090"
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(
-        render_engine=c4d_mod.RDATA_RENDERENGINE_REDSHIFT,
-    ), machine_features=bc)
+    c4d_mod.set_state(active_doc=c4d_mod.make_document(), machine_features=bc)
     ctx = c4dp.C4DContext.capture()
     c4dp.c4d_update_small_icon(ctx)
     assert fresh_details.small_icon_text == "Redshift | RTX 4090"
@@ -590,18 +552,15 @@ def test_update_presence_details_rendering_full(c4d_mod, c4dp,
     fresh_prefs.displayFrames = True
     fresh_session.is_rendering = True
     fresh_session.rendered_frames = 17
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(
-        name="big_render.c4d",
-        render_resolution=(1920, 1080),
-        min_frame=0, max_frame=100, fps=24,
-    ))
+    fresh_session.rendering_doc = "big_render.c4d"
+    fresh_session.render_res = (1920, 1080)
+    c4d_mod.set_state(active_doc=c4d_mod.make_document())
     ctx = c4dp.C4DContext.capture()
     c4dp.c4d_update_presence_details(ctx)
     text = fresh_details.details_text
     assert "big_render.c4d" in text
     assert "1920x1080" in text
-    assert "Frame 17 of 100" in text
-    assert "@24fps" in text
+    assert "Frame 17" in text
 
 
 def test_update_presence_details_rendering_no_filename(c4d_mod, c4dp,
@@ -612,9 +571,8 @@ def test_update_presence_details_rendering_no_filename(c4d_mod, c4dp,
     fresh_prefs.displayRenderStats = False
     fresh_prefs.displayFrames = False
     fresh_session.is_rendering = True
-    c4d_mod.set_state(active_doc=c4d_mod.make_document(
-        name="hidden.c4d", fps=24,
-    ))
+    fresh_session.rendering_doc = "hidden.c4d"
+    c4d_mod.set_state(active_doc=c4d_mod.make_document())
     ctx = c4dp.C4DContext.capture()
     c4dp.c4d_update_presence_details(ctx)
     assert "hidden.c4d" not in fresh_details.details_text
@@ -777,38 +735,6 @@ def test_message_reset_all_restores_int_default(c4d_mod, c4dp, prefs_instance):
     assert bc.GetInt32(int(c4dp.C4DP.C4DPRESENCE_STYPE)) == int(
         c4dp.C4DP.C4DPRESENCE_INFOOBJ
     )
-
-
-def test_message_render_start_flips_session(c4d_mod, c4dp, prefs_instance):
-    """MSG_MULTI_RENDERNOTIFICATION with start=True flips
-    C4DP_SESSION.is_rendering on; with start=False, off."""
-    original = c4dp.C4DP_SESSION.is_rendering
-    try:
-        prefs_instance.Message(None, c4d_mod.MSG_MULTI_RENDERNOTIFICATION,
-                               {"start": True, "animated": True})
-        assert c4dp.C4DP_SESSION.is_rendering is True
-        assert c4dp.C4DP_SESSION.render_is_animated is True
-        prefs_instance.Message(None, c4d_mod.MSG_MULTI_RENDERNOTIFICATION,
-                               {"start": False, "animated": False})
-        assert c4dp.C4DP_SESSION.is_rendering is False
-    finally:
-        c4dp.C4DP_SESSION.is_rendering = original
-
-
-def test_message_documentinfo_load_resets_timer_when_pref_set(c4d_mod, c4dp,
-                                                              prefs_instance):
-    original_start = c4dp.C4DP_SESSION.start_time
-    original_reset = c4dp.C4DP_PREFS.resetTimer
-    try:
-        c4dp.C4DP_PREFS.resetTimer = True
-        c4dp.C4DP_SESSION.start_time = 0.0
-        prefs_instance.Message(None, c4d_mod.MSG_DOCUMENTINFO,
-                               {"type": c4d_mod.MSG_DOCUMENTINFO_TYPE_LOAD})
-        assert c4dp.C4DP_SESSION.start_time > 0.0
-    finally:
-        c4dp.C4DP_SESSION.start_time = original_start
-        c4dp.C4DP_PREFS.resetTimer = original_reset
-
 
 def test_message_documentinfo_load_preserves_timer_when_pref_unset(c4d_mod, c4dp,
                                                                    prefs_instance):

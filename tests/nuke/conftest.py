@@ -9,7 +9,7 @@ so we set up the fake to make them all succeed without side effects:
   - nuke.menu(...) returns a stub menu tree that records additions.
   - nuke.addBeforeRender/etc. record callbacks instead of firing anything.
   - NK_WORKER starts a daemon thread that waits NK_PREFS.generalUpdate
-    seconds (12s default) between ticks; tests finish long before then.
+    seconds (15s default) between ticks; tests finish long before then.
 """
 from __future__ import annotations
 import sys

@@ -30,30 +30,30 @@ Enabling colored icons will also create a tooltip on the icon with a name for th
 
 > **Quick read:** If you're on Windows and haven't changed the **Title format** under Edit -> Preferences -> Image Windows -> Title & Statusbar, this just works. You can stop reading here.
 
-GIMP 3's Python API does not expose which image is currently focused/active. To still surface useful info about what you're working on, the plugin runs a cascade of detection strategies; the first one that succeeds wins.
+GIMP 3's Python API does not directly expose which image is currently focused/active. The plugin runs a series of workaround detection strategies, stopping as soon as one succeeds.
 
 #### 1. Only one image open
-If `len(Gimp.get_images()) == 1`, that single image is the active image.
+If there is only a single image open, that image is the active image.
 
-#### 2. Window title query (Windows only at present)
-If more than one image is open, the plugin tries to find the active GIMP window's title and extract the image name from it.
+#### 2. Window title query (currently only works on Windows)
+If more than one image is open, the plugin tries to find the active GIMP window's title and extract the image name from it. This should work as long as the title format for the application hasn't been changed from the default.
 
 This step is currently **Windows-only**:
-- **macOS**: may be implemented eventually, but not currently in development; I don't have a MacOS device.
-- **Linux**: not supported. Wayland doesn't expose window titles to non-compositor processes, and is the default on modern Linux distros such as Ubuntu 26.04. Linux users with multiple images open should rely on the fallback options below.
+- **macOS**: may be implemented eventually, but not currently in development; I don't have a MacOS device to develop or test on.
+- **Linux**: not supported. Wayland, to my knowledge, doesn't expose window titles to non-compositor processes, and is the default on modern Linux distros such as Ubuntu 26.04. Linux users with multiple images open should rely on the fallback options below.
 
 #### 3. Fallback ordering (optional)
 If the one-image check fails and the window-title query is unavailable or doesn't match any open image, the plugin can optionally fall back to picking an image by stack position. In the settings menu, **Active-image fallback** can be set to:
 - **None** (default) — don't guess; some queries will return fallback information gathered from all images, unless the 'use fallback info' setting is turned off, in which case the queries will return nothing and either display nothing (if selected manually) or be skipped (if cycling).
-- **Recent / Bottom** — the bottom image in the stack, which will be the most recently opened image unless you rearrange the stack.
-- **Oldest / Top** — the top image in the stack, which will be the oldest opened image unless you rearrange the stack.
+- **Recent / Top** — the top image in the stack, which will be the most recently opened image unless you rearrange the stack.
+- **Oldest / Bottom** — the bottom image in the stack, which will be the oldest opened image unless you rearrange the stack.
 
 > You can re-order the stack by dragging images in GIMP's Images dialog (Windows -> Dockable Dialogs -> Images).
 
 #### 4. Pinning the active image
-You can override the entire cascade by **pinning** an image. With an image open, choose Filters -> Discord Presence -> Pin Image (or assign a keyboard shortcut). While pinned, the plugin always reports info about that image regardless of focus, window title, or any fallback setting. This is also useful if you have a primary working image and several auxiliary images open (reference scraps, copy-paste sources, trimming work) and you want Discord to keep showing the primary. The pinned image will remain pinned until you unpin it (Filters -> Discord Presence -> Unpin Image), or until it is closed. If you close a pinned image without unpinning, the plugin will print a warning to the GIMP console.
+You can override the entire detection system by **pinning** an image. With an image open, choose Filters -> Discord Presence -> Pin Image (or assign a keyboard shortcut). While pinned, the plugin always reports info about that image regardless of focus, window title, or any fallback setting. This is also useful if you have a primary working image and several auxiliary images open (reference scraps, copy-paste sources, trimming work) and you want Discord to keep showing the primary. The pinned image will remain pinned until you unpin it (Filters -> Discord Presence -> Unpin Image), or until it is closed. If you close a pinned image without unpinning, the plugin will print a warning to the GIMP console.
 
-The pinned image is marked with a 📌 in the active image name field.
+The pinned image is marked with a 📌 in the active image name field in Discord.
 
 #### 5. Cross-image fallback information
 When the active image can't be determined and an info field would otherwise return nothing, by default the plugin gathers information across *all* open images instead. For example:

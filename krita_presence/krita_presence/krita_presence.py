@@ -394,7 +394,7 @@ class KPPlugin(RPCBasePlugin):
         else:
             try:
                 self.doc_times[id(doc)] = int(doc_time.text)
-            except ValueError, TypeError:
+            except (ValueError, TypeError):  # fmt:skip
                 self.doc_times[id(doc)] = 0
 
     def update_small_icon(self, ctx: KPContext):  # pylint: disable=unused-argument

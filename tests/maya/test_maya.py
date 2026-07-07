@@ -1,10 +1,8 @@
 """
 Tests for MPContext (Maya plugin).
 
-The tail of the file contains regression tests for four bugs surfaced during
+The tail of the file contains regression tests for three bugs surfaced during
 a docs cross-check:
-  * MPExtensionMonitor.count crashed if listNodeTypes returned None — see
-    test_extension_monitor_count_handles_none_listnodetypes.
   * get_gpu_str trimmed the final character of any GPU string that contains
     no '/' separator — see test_get_gpu_str_no_slash_preserves_full_name.
   * mp_uninstall_render_handlers used `return` instead of `continue`, so an
@@ -13,6 +11,12 @@ a docs cross-check:
   * mp_check_render_handlers_installed treated a RuntimeError on the first
     attr as 'not installed' even if later attrs had hooks — see
     test_check_render_handlers_installed_continues_past_runtimeerror.
+
+Plus a regression test pinning extension_types.rebuild()'s tolerance of
+None returns from listNodeTypes (see
+test_extension_types_rebuild_handles_none_listnodetypes); same shape as
+the original MPExtensionMonitor.count crash, retargeted to the simpler
+post-refactor surface.
 """
 from __future__ import annotations
 import pytest
@@ -428,8 +432,8 @@ def test_mpsettings_falls_back_to_field_defaults(cmds):
     """Field with no optionVar and not in _INITIAL_DEFAULTS uses dataclass default."""
     cmds.set_state(option_vars={})
     s = MPSettings()
-    # generalUpdate default is 12 from SharedSettings.
-    assert s.generalUpdate == 12
+    # Maya overrides the shared update interval default to 15 seconds.
+    assert s.generalUpdate == 15
     assert s.generalEnable is True
 
 
@@ -471,102 +475,129 @@ def test_mpsettings_reset_restores_initial_defaults(cmds):
     s.stateType = "frame"
     s.generalUpdate = 60
     s.reset()
-    # _INITIAL_DEFAULTS["stateType"] = "poly"; generalUpdate default is 12.
+    # _INITIAL_DEFAULTS["stateType"] = "poly"; generalUpdate default is 15.
     assert s.stateType == "poly"
-    assert s.generalUpdate == 12
+    assert s.generalUpdate == 15
 
 
 # ---------------------------------------------------------------------------
-# MPExtensionMonitor (render-engine plugin watcher)
+# Extension type cache + countExtensions integration
 # ---------------------------------------------------------------------------
+# The engine-registration system was replaced with a cmds.listNodeTypes-based
+# cache: extension_types.rebuild() (re)populates frozensets of light/material/
+# texture node-type names, and context.get_*_count adds an extra ls() over
+# those types when MP_PREFS.countExtensions is on. Plug-in load/unload
+# observers just call rebuild() — no per-engine knowledge required.
 
-from maya_presence import MPExtensionMonitor, MP_EXTENSIONS, MP_PREFS  # noqa: E402
+from maya_presence import MP_PREFS  # noqa: E402
+from mayapresence_util import extension_types  # noqa: E402
 
 
-def test_extension_monitor_init_engine_populates_types(cmds):
+@pytest.fixture
+def reset_extension_types():
+    """Snapshot/restore the cached frozensets so cross-test contamination
+    doesn't leak."""
+    snap = (
+        extension_types.MP_EXT_LIGHTS,
+        extension_types.MP_EXT_MATERIALS,
+        extension_types.MP_EXT_TEXTURES,
+    )
+    yield
+    (
+        extension_types.MP_EXT_LIGHTS,
+        extension_types.MP_EXT_MATERIALS,
+        extension_types.MP_EXT_TEXTURES,
+    ) = snap
+
+
+def test_rebuild_populates_typesets_from_listnodetypes(cmds, reset_extension_types):
+    """rebuild() reads each of light/shader/texture via listNodeTypes and
+    snapshots the result into a frozenset. Whatever Maya classifies under
+    those names becomes the extension contribution."""
     cmds.set_state(node_types_by_path={
-        "rendernode/redshift/light": ["RedshiftPhysicalLight", "RedshiftSpot"],
-        "rendernode/redshift/shader": ["RedshiftMaterial"],
-        "rendernode/redshift/texture": ["RedshiftBitmap"],
-    })
-    mon = MPExtensionMonitor()
-    mon.init_engine("Redshift")
-    engine = mon.monitored_engines["Redshift"]
-    assert engine.loaded is True
-    assert engine.types == {
-        "light": ["RedshiftPhysicalLight", "RedshiftSpot"],
-        "material": ["RedshiftMaterial"],
+        "light": ["aiAreaLight", "RedshiftPhysicalLight"],
+        "shader": ["aiStandardSurface"],
         "texture": ["RedshiftBitmap"],
-    }
-
-
-def test_extension_monitor_count_zero_when_engine_not_loaded(cmds):
-    mon = MPExtensionMonitor()
-    # No engine initialized => count returns 0
-    assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 0
-
-
-def test_extension_monitor_count_uses_types_when_pref_enabled(cmds):
-    """When countExtensions is on, count() sums ls() matches across all
-    loaded engines' type lists. (The previous per-engine countArnold /
-    countRS / countPxr / countVRay flags were consolidated into a single
-    countExtensions toggle.)"""
-    cmds.set_state(node_types_by_path={
-        "rendernode/arnold/light": ["aiAreaLight"],
     })
-    mon = MPExtensionMonitor()
-    mon.init_engine("Arnold")
-    # ls(type=["aiAreaLight"]) needs to return some count.
-    cmds.set_state(ls_results={("type_multi", ("aiAreaLight",)): ["lt1", "lt2"]})
+    extension_types.rebuild()
+    assert extension_types.MP_EXT_LIGHTS == frozenset(
+        ["aiAreaLight", "RedshiftPhysicalLight"]
+    )
+    assert extension_types.MP_EXT_MATERIALS == frozenset(["aiStandardSurface"])
+    assert extension_types.MP_EXT_TEXTURES == frozenset(["RedshiftBitmap"])
+
+
+def test_rebuild_handles_missing_classifications(cmds, reset_extension_types):
+    """If listNodeTypes returns None for a classification (no plug-ins
+    contribute that category), the corresponding cache becomes an empty
+    frozenset rather than crashing."""
+    cmds.set_state(node_types_by_path={})  # no entries → all return None
+    extension_types.rebuild()
+    assert extension_types.MP_EXT_LIGHTS == frozenset()
+    assert extension_types.MP_EXT_MATERIALS == frozenset()
+    assert extension_types.MP_EXT_TEXTURES == frozenset()
+
+
+def test_context_get_light_count_adds_extension_types(cmds, reset_extension_types):
+    """With countExtensions on AND a populated extension light set, the
+    context's get_light_count adds the ls(type=<extension types>) count
+    on top of the base ls(lights=True) count."""
+    cmds.set_state(node_types_by_path={
+        "light": ["aiAreaLight"],
+    })
+    extension_types.rebuild()
+    cmds.set_state(
+        ls_results={
+            ("lights",): ["pointLight1"],                   # 1 base Maya light
+            ("type_multi", ("aiAreaLight",)): ["aiLight1"], # 1 Arnold light
+        }
+    )
     snap = MP_PREFS.countExtensions
     MP_PREFS.countExtensions = True
     try:
-        assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 2
+        ctx = MPContext.capture()
+        assert ctx.get_light_count() == "2 lights"
     finally:
         MP_PREFS.countExtensions = snap
 
 
-def test_context_get_light_count_excludes_extensions_when_pref_disabled(cmds):
-    """MPExtensionMonitor.count() now returns the raw count; the
-    `countExtensions` pref gate lives in the call sites in context.py
-    (get_light_count / get_mat_count / get_tex_count). When the pref is
-    off, the extension contribution is skipped — only base Maya lights
-    show up."""
+def test_context_get_light_count_excludes_extensions_when_pref_disabled(
+    cmds, reset_extension_types
+):
+    """countExtensions=False skips the extra ls() entirely — even if the
+    extension-type cache is populated, the base count is what gets used."""
     cmds.set_state(node_types_by_path={
-        "rendernode/arnold/light": ["aiAreaLight"],
+        "light": ["aiAreaLight"],
     })
-    MP_EXTENSIONS.init_engine("Arnold")
+    extension_types.rebuild()
     cmds.set_state(
         ls_results={
-            ("lights",): ["pointLight1"],                  # 1 base Maya light
-            ("type_multi", ("aiAreaLight",)): ["aiLight1"], # 1 Arnold light
+            ("lights",): ["pointLight1"],
+            ("type_multi", ("aiAreaLight",)): ["aiLight1"],
         }
     )
     snap = MP_PREFS.countExtensions
     MP_PREFS.countExtensions = False
     try:
         ctx = MPContext.capture()
-        # Pref off → "1 light", not "2 lights" — the Arnold contribution
-        # is skipped despite the engine being initialized.
         assert ctx.get_light_count() == "1 light"
     finally:
         MP_PREFS.countExtensions = snap
 
 
-def test_extension_monitor_count_unfiltered(cmds):
-    """Direct contract: MPExtensionMonitor.count() returns the raw count
-    regardless of MP_PREFS.countExtensions — the pref-gating is the
-    caller's job, not the monitor's."""
-    cmds.set_state(node_types_by_path={
-        "rendernode/arnold/light": ["aiAreaLight"],
-    })
-    mon = MPExtensionMonitor()
-    mon.init_engine("Arnold")
-    cmds.set_state(ls_results={("type_multi", ("aiAreaLight",)): ["lt1"]})
+def test_context_get_light_count_with_empty_cache_skips_extra_ls(
+    cmds, reset_extension_types
+):
+    """When the extension-type cache is empty (no engine plug-ins loaded),
+    the extra ls() is short-circuited even with countExtensions on. Keeps
+    a stale or just-cleared cache from issuing a pointless cmds call."""
+    extension_types.MP_EXT_LIGHTS = frozenset()
+    cmds.set_state(ls_results={("lights",): ["pointLight1"]})
     snap = MP_PREFS.countExtensions
-    MP_PREFS.countExtensions = False
+    MP_PREFS.countExtensions = True
     try:
-        assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 1
+        ctx = MPContext.capture()
+        assert ctx.get_light_count() == "1 light"
     finally:
         MP_PREFS.countExtensions = snap
 
@@ -578,53 +609,44 @@ def test_extension_monitor_count_unfiltered(cmds):
 from maya_presence import mp_observe_plugin_load, mp_observe_plugin_unload  # noqa: E402
 
 
-@pytest.fixture
-def reset_monitored_engines():
-    """Snapshot/restore each monitored engine's loaded flag so observers
-    don't pollute other tests."""
-    snap = {name: (eng.loaded, eng.types) for name, eng in MP_EXTENSIONS.monitored_engines.items()}
-    yield
-    for name, (loaded, types) in snap.items():
-        MP_EXTENSIONS.monitored_engines[name].loaded = loaded
-        MP_EXTENSIONS.monitored_engines[name].types = types
-
-
-def test_observe_plugin_load_initializes_known_engine(cmds, reset_monitored_engines):
+def test_observe_plugin_load_rebuilds_typesets(cmds, reset_extension_types):
+    """Both observers route through extension_types.rebuild(), which
+    re-reads listNodeTypes. We assert by changing what listNodeTypes
+    returns and confirming the observer picked up the change."""
+    cmds.set_state(node_types_by_path={"light": ["aiAreaLight"]})
+    extension_types.rebuild()
+    assert extension_types.MP_EXT_LIGHTS == frozenset(["aiAreaLight"])
+    # Now Redshift loads — its types appear in listNodeTypes.
     cmds.set_state(node_types_by_path={
-        "rendernode/redshift/light": ["RedshiftLight"],
-        "rendernode/redshift/shader": ["RedshiftMat"],
-        "rendernode/redshift/texture": ["RedshiftTex"],
+        "light": ["aiAreaLight", "RedshiftPhysicalLight"],
     })
-    # The kAfterPluginLoad string array is [plugin_path, plugin_name]; observers
-    # use string_array[-1] (the name).
-    mp_observe_plugin_load(["/path/to/redshift4maya.so", "redshift4maya"], None)
-    assert MP_EXTENSIONS.monitored_engines["Redshift"].loaded is True
+    mp_observe_plugin_load(["/path/redshift4maya.so", "redshift4maya"], None)
+    assert extension_types.MP_EXT_LIGHTS == frozenset(
+        ["aiAreaLight", "RedshiftPhysicalLight"]
+    )
 
 
-def test_observe_plugin_load_ignores_unknown_plugin(cmds, reset_monitored_engines):
-    # Reset to a known state first.
-    for eng in MP_EXTENSIONS.monitored_engines.values():
-        eng.loaded = False
-    mp_observe_plugin_load(["/path", "some_unrelated_plugin"], None)
-    for name, eng in MP_EXTENSIONS.monitored_engines.items():
-        assert eng.loaded is False
+def test_observe_plugin_unload_rebuilds_typesets(cmds, reset_extension_types):
+    """Unload runs the same rebuild path; types from the unloaded plug-in
+    disappear from listNodeTypes and from the cache."""
+    cmds.set_state(node_types_by_path={
+        "light": ["aiAreaLight", "RedshiftPhysicalLight"],
+    })
+    extension_types.rebuild()
+    cmds.set_state(node_types_by_path={"light": ["aiAreaLight"]})
+    mp_observe_plugin_unload(["mtoa", "/path/mtoa.so"], None)
+    # Arnold "left" — listNodeTypes drops it from the snapshot.
+    assert extension_types.MP_EXT_LIGHTS == frozenset(["aiAreaLight"])
 
 
-def test_observe_plugin_load_empty_string_array_noop(cmds, reset_monitored_engines):
-    for eng in MP_EXTENSIONS.monitored_engines.values():
-        eng.loaded = False
+def test_observe_plugin_load_empty_string_array_noop(cmds, reset_extension_types):
+    """The string-array variant of the observer can receive an empty list
+    in edge cases — make sure that doesn't crash. With the simplified
+    observer it just runs rebuild() either way."""
+    cmds.set_state(node_types_by_path={"light": ["aiAreaLight"]})
     mp_observe_plugin_load([], None)
-    for name, eng in MP_EXTENSIONS.monitored_engines.items():
-        assert eng.loaded is False
-
-
-def test_observe_plugin_unload_marks_engine_unloaded(cmds, reset_monitored_engines):
-    # Pre-load Arnold so we can verify the unload.
-    MP_EXTENSIONS.monitored_engines["Arnold"].loaded = True
-    # The kAfterPluginUnload string array is [plugin_name, plugin_path];
-    # observers use string_array[0] (the name).
-    mp_observe_plugin_unload(["mtoa", "/path/to/mtoa.so"], None)
-    assert MP_EXTENSIONS.monitored_engines["Arnold"].loaded is False
+    # Rebuild ran; cache reflects whatever listNodeTypes returned.
+    assert extension_types.MP_EXT_LIGHTS == frozenset(["aiAreaLight"])
 
 
 # ---------------------------------------------------------------------------
@@ -1299,21 +1321,20 @@ def test_get_gpu_str_no_slash_preserves_full_name(cmds):
     assert ctx.get_gpu_str() == "Intel Iris Xe Graphics"
 
 
-def test_extension_monitor_count_handles_none_listnodetypes(cmds):
+def test_extension_types_rebuild_handles_none_listnodetypes(cmds):
+    """Same regression as the original MPExtensionMonitor case, retargeted
+    at the simpler extension_types.rebuild(): a category that returns None
+    (no plug-ins contribute that classification) yields an empty frozenset
+    instead of crashing."""
     cmds.set_state(node_types_by_path={
-        "rendernode/arnold/light": None,  # plugin loaded but no light types
-        "rendernode/arnold/shader": ["aiStandardSurface"],
-        "rendernode/arnold/texture": ["aiImage"],
+        "light": None,  # no plug-ins contribute light types
+        "shader": ["aiStandardSurface"],
+        "texture": ["aiImage"],
     })
-    mon = MPExtensionMonitor()
-    mon.init_engine("Arnold")
-    snap = MP_PREFS.countExtensions
-    MP_PREFS.countExtensions = True
-    try:
-        # Should treat the missing light category as zero, not crash.
-        assert mon.count(MPExtensionMonitor.TypeCategory.LIGHT) == 0
-    finally:
-        MP_PREFS.countExtensions = snap
+    extension_types.rebuild()
+    assert extension_types.MP_EXT_LIGHTS == frozenset()
+    assert extension_types.MP_EXT_MATERIALS == frozenset(["aiStandardSurface"])
+    assert extension_types.MP_EXT_TEXTURES == frozenset(["aiImage"])
 
 
 def test_uninstall_render_handlers_skips_empty_attrs_correctly(cmds):

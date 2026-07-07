@@ -1,7 +1,7 @@
 """
 Layer 1: shared globals + worker accessor.
 
-Imports allowed from: settings (L0), extension_monitor (L0), common, stdlib.
+Imports allowed from: settings (L0), common, stdlib.
 This module must NOT import from higher-layer modules (render_hooks, rpc,
 context, settings_menu, timer, callbacks) — those depend on this module,
 so any reverse edge creates a cycle.
@@ -25,11 +25,9 @@ from typing import Any, Optional
 from common import SessionInfo, RPCUpdateDetails
 
 from .settings import MPSettings
-from .extension_monitor import MPExtensionMonitor
 
 
 MP_DISCORD_APP_ID = "1498143095852634252"
-MP_EXTENSIONS = MPExtensionMonitor()
 
 MP_PREFS: MPSettings = MPSettings()
 MP_SESSION: SessionInfo = SessionInfo()

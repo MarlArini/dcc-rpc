@@ -1,12 +1,11 @@
 """
 MayaPresence is a Discord Rich Presence client plugin for Autodesk Maya, based on
 https://github.com/abrasic/blendpresence. MayaPresence has been tested on Maya 2026
-and Maya 2027. For more info, see https://github.com/MarlArini/the-name-of-the-repo
+and Maya 2027. For more info, see https://github.com/MarlArini/dcc-rpc
 """
 
 import atexit
 import time
-from typing import List, cast
 
 # pylint: disable=import-error, no-name-in-module, line-too-long, unused-import
 import maya.cmds as cmds  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
@@ -20,11 +19,10 @@ import maya.api.OpenMaya as om  # pyright: ignore[reportMissingImports, reportMi
 # etc.) come along intentionally instead of by accident.
 from mayapresence_util import (  # noqa: F401  pylint: disable=unused-import
     # L0
-    MPExtensionMonitor,
     MPSettings,
+    extension_types,
     # L1
     MP_DISCORD_APP_ID,
-    MP_EXTENSIONS,
     MP_PREFS,
     MP_SESSION,
     MP_UPDATE_DETAILS,
@@ -84,13 +82,6 @@ def maya_useNewAPI():
     pass
 
 
-def mp_check_loaded_engines():
-    plugins = cast(List[str], cmds.pluginInfo(query=True, listPlugins=True))
-    for engine_name, engine in MP_EXTENSIONS.monitored_engines.items():
-        if engine.plugin_name in plugins:
-            MP_EXTENSIONS.init_engine(engine_name)
-
-
 # The canonical MP_WORKER reference lives in mayapresence_util.shared_state
 # (re-exported above). All reads go through _get_worker(); writes go
 # through _set_worker(). We don't keep a local module-level shadow here
@@ -106,11 +97,14 @@ def mp_start():
         worker = _MPRPCWorker(MP_DISCORD_APP_ID)
         worker.start()
         _set_worker(worker)
+    # Seed the extension-type cache from whatever plug-ins are already
+    # loaded at this point. mp_add_callbacks below registers the
+    # kAfterPluginLoad/Unload handlers that keep it refreshed.
+    extension_types.rebuild()
     mp_update_presence()
     if MP_PREFS.useRenderHooks:
         mp_install_render_handlers()
     mp_install_settings_menu()
-    mp_check_loaded_engines()
     mp_add_callbacks()
     mp_schedule()
 

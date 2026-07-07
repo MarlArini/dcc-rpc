@@ -359,7 +359,7 @@ def test_on_reset_clicked_yes_resets_prefs(dialog, prefs, monkeypatch):
     # _GuiTestSettings.reset() restores SharedSettings field defaults
     # (with _INITIAL_DEFAULTS overrides applied).
     assert prefs.generalEnable is True
-    assert prefs.generalUpdate == 12
+    assert prefs.generalUpdate == 15
 
 
 def test_on_reset_clicked_no_does_nothing(dialog, prefs, monkeypatch):
@@ -392,8 +392,8 @@ def test_on_reset_clicked_updates_widgets_from_prefs(dialog, prefs, monkeypatch)
         staticmethod(lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes),
     )
     dialog._on_reset_clicked()
-    # Default for generalUpdate (after reset) is 12.
-    assert dialog._gui_widgets["generalUpdate"].value() == 12
+    # Default for generalUpdate (after reset) is 15.
+    assert dialog._gui_widgets["generalUpdate"].value() == 15
 
 
 # ---------------------------------------------------------------------------

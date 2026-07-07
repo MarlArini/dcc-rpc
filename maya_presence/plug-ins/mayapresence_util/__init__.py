@@ -4,7 +4,7 @@ mayapresence_util — internal submodules for the Maya plug-in.
 Re-exports are listed in the same bottom-up order as the layering so
 the read order matches the dependency order:
 
-    L0  settings, extension_monitor
+    L0  settings, extension_types
     L1  shared_state
     L2  context, worker_thread
     L3  rpc
@@ -17,13 +17,12 @@ upward should go through this package's import surface, not via a
 direct `from .submodule import X` from outside the package.
 """
 # L0
+from . import extension_types
 from .settings import MPSettings
-from .extension_monitor import MPExtensionMonitor
 
 # L1
 from .shared_state import (
     MP_DISCORD_APP_ID,
-    MP_EXTENSIONS,
     MP_PREFS,
     MP_SESSION,
     MP_UPDATE_DETAILS,
