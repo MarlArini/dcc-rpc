@@ -971,9 +971,10 @@ def test_update_details_rendering_branch_uses_bake_progress(sp, sp_plugin_clean)
     sp.set_state(project_name="MyTextures")
     ctx = _ctx_with(sp, sp.make_qt_main_window())
     sp_plugin_clean.update_details(ctx)
-    assert "Baking" in sp_plugin_clean.details.details_text
+    sp_plugin_clean.update_state(ctx)
+    assert "Baking" in sp_plugin_clean.details.state_text
     assert "MyTextures" in sp_plugin_clean.details.details_text
-    assert "42%" in sp_plugin_clean.details.details_text
+    assert "42%" in sp_plugin_clean.details.state_text
 
 
 # --- Additional None-edges in Painter Context ---

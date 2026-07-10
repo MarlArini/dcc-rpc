@@ -6,10 +6,10 @@ For more info, see https://github.com/MarlArini/dcc-rpc.
 
 import atexit
 from dataclasses import dataclass, field
+from enum import Enum
 import os
 import time
 from typing import Any, Callable, ClassVar, Dict, List, Tuple
-import PySide6.QtGui as QtG
 import PySide6.QtWidgets as QtW
 import substance_painter as sp  # pylint: disable=import-error
 
@@ -89,37 +89,114 @@ class SPSettings(ColoredIconSettings, SharedSettings, JSONSharedSettings):
 ###########
 
 
+class UIMode(Enum):
+    BAKING = 1
+    PAINTING = 2
+    RENDERING = 3
+
+
+_UI_MODE_STATE = {
+    UIMode.BAKING: "Adjusting baking settings",
+    UIMode.RENDERING: "Previewing in IRay",
+}
+
+_UI_MODE_ICONS = {
+    UIMode.BAKING: ("baking", "Baking settings"),
+    UIMode.RENDERING: ("rendering", "Previewing in IRay"),
+}
+
+
+def current_ui(window: QtW.QMainWindow) -> UIMode:
+    """Query the Qt QMainWindow to determine the UI mode (painting, baking, or
+    rendering). Fall back to painting if the mode cannot be determined since
+    Qt object names might change and painting is the most likely state for
+    a user to be in."""
+    try:
+        ui_mode_container = window.findChild(
+            QtW.QWidget, "paint_editor_toolbar_ui_mode"
+        )
+        if not ui_mode_container:
+            return UIMode.PAINTING
+        selected_items = [
+            i for i in ui_mode_container.findChildren(QtW.QToolButton) if i.isChecked()
+        ]
+        if not selected_items:
+            return UIMode.PAINTING
+        action = selected_items[0].defaultAction()
+        if action is None:
+            return UIMode.PAINTING
+        ui_name = action.objectName()
+    except RuntimeError:
+        return UIMode.PAINTING
+    if ui_name == "bakingAction":
+        return UIMode.BAKING
+    elif ui_name == "rendering_mode":
+        return UIMode.RENDERING
+    return UIMode.PAINTING
+
+
+def get_project_name() -> str | None:
+    try:
+        p_name = sp.project.name()
+    except sp.exception.ProjectError:  # pyright: ignore[reportGeneralTypeIssues]
+        return None
+    if p_name is None:
+        return "Unsaved Project"
+    return f"Project: {p_name}"
+
+
 @dataclass
 class SPContext:
     texture_sets: List[sp.textureset.TextureSet]
-    stack: sp.textureset.Stack
+    stack: sp.textureset.Stack | None
     main_window: QtW.QMainWindow
     active_only: bool
+    ui_mode: UIMode = UIMode.PAINTING
 
     @classmethod
     def capture(cls, active_only: bool) -> "SPContext | None":
+        # fmt: off
+        if get_project_name() is None:
+            return None
+        # Window
         try:
-            stack = sp.textureset.get_active_stack()
-            sets = sp.textureset.all_texture_sets()
             window = sp.ui.get_main_window()
-            return cls(
-                texture_sets=sets,
-                stack=stack,
-                main_window=window,
-                active_only=active_only,
-            )
+        except sp.exception.ServiceNotFoundError:  # pyright: ignore[reportGeneralTypeIssues]
+            return None
+        # Texture sets
+        try:
+            sets = sp.textureset.all_texture_sets() or []
         except (  # 12.0.3 Stubs are wrong and label exceptions as enum.Enum; suppress Pylance
             RuntimeError,
             sp.exception.ProjectError,
             sp.exception.ServiceNotFoundError,
         ):  # pyright: ignore[reportGeneralTypeIssues]
             return None
+        # Active stack
+        try:
+            stack = sp.textureset.get_active_stack()
+        except (
+            sp.exception.ProjectError,
+            sp.exception.ServiceNotFoundError
+        ):  # pyright: ignore[reportGeneralTypeIssues]
+            return None
+        except RuntimeError:
+            stack = None
+        # UI mode
+        ui_mode = current_ui(window)
+        if stack is None and ui_mode not in _UI_MODE_STATE:
+            return None
+        # fmt: on
+        return cls(
+            texture_sets=sets,
+            stack=stack,
+            main_window=window,
+            active_only=active_only,
+            ui_mode=ui_mode,
+        )
 
     def get_project_name(self) -> str:
-        p_name = sp.project.name()
-        if p_name is None:
-            return "Unsaved Project"
-        return f"Project: {p_name}"
+        return get_project_name() or "No project open"
 
     def get_num_meshes(self) -> str:
         count = sum([len(texset.all_mesh_names()) for texset in self.texture_sets])
@@ -128,18 +205,24 @@ class SPContext:
     def get_num_texsets(self) -> int:
         return len(self.texture_sets)
 
-    def get_active_texset_name(self) -> str:
+    def get_active_texset_name(self) -> str | None:
+        if self.stack is None:
+            return None
         return self.stack.material().name
 
-    def get_material_resolution_str(self) -> str:
+    def get_material_resolution_str(self) -> str | None:
+        if self.stack is None:
+            return None
         material_resolution = self.stack.material().get_resolution()
         return f"{material_resolution.width}x{material_resolution.height}"
 
-    def get_active_texset_info(self) -> str:
+    def get_active_texset_info(self) -> str | None:
         """Return a formatted string containing the name and resolution
         of the active texture set"""
         tn = self.get_active_texset_name()
         tmr = self.get_material_resolution_str()
+        if tn is None or tmr is None:
+            return None
         return f"Texture set: {tn} ({tmr})"
 
     def _recurse_count_nodes(self, root_node) -> int:
@@ -153,8 +236,10 @@ class SPContext:
         else:
             return 1
 
-    def get_num_layers(self) -> str:
+    def get_num_layers(self) -> str | None:
         if self.active_only:
+            if self.stack is None:
+                return None
             count = sum(
                 [
                     self._recurse_count_nodes(node)
@@ -178,6 +263,8 @@ class SPContext:
         """Return a string (the active layer name) if only one layer is
         selected, and an int (the number of selected layers) otherwise.
         """
+        if self.stack is None:
+            return 0
         selected_nodes = sp.layerstack.get_selected_nodes(self.stack)
         count = len(selected_nodes)
         if count != 1:
@@ -187,6 +274,8 @@ class SPContext:
 
     def get_num_uv_tiles(self) -> int | None:
         if self.active_only:
+            if self.stack is None:
+                return None
             active_stack_set = self.stack.material()
             if not active_stack_set.has_uv_tiles():
                 return None
@@ -213,12 +302,16 @@ class SPContext:
         )
 
     def get_active_layer_blend_mode(self) -> str | None:
+        if self.stack is None:
+            return None
         selected_nodes = sp.layerstack.get_selected_nodes(self.stack)
         if selected_nodes and selected_nodes[0].is_in_mask_stack():
             return selected_nodes[0].get_blending_mode(None).name
         return None
 
-    def get_layer_num_channels(self) -> str:
+    def get_layer_num_channels(self) -> str | None:
+        if self.stack is None:
+            return None
         return sp_plural(len(self.stack.all_channels()), "channel")
 
     def get_active_layer_info(self) -> str | None:
@@ -330,7 +423,8 @@ class SPContext:
         mat_label = self._find_named(mat_params, QtW.QLabel, "dropzone_text")
         if mat_label is None:
             return None
-        return mat_label.text()
+        label = mat_label.text()
+        return label if label != "No resource selected" else None
 
     def get_brush_alpha(self) -> str | None:
         """Query the UI for brush alpha by looking for the MaskParametersView widget
@@ -429,14 +523,20 @@ class SPPlugin(RPCBasePlugin):
             else:
                 self.details.small_icon_text = "Baking"
             return
+        # Baking / rendering UI panes: there is no active stack and no active
+        # tool, so surface an icon that reflects what phase of work the user
+        # is in rather than falling through to a stale/empty tool query.
+        if ctx.ui_mode in _UI_MODE_ICONS:
+            icon_key, icon_text = _UI_MODE_ICONS[ctx.ui_mode]
+            self.details.small_icon = icon_key
+            self.details.small_icon_text = icon_text
+            return
         tool = ctx.get_active_tool()
         if tool is None:
             return
         tool_objname, tool_text = tool
-        # Colored icons for Paint and Physical Paint tools
-        if self.prefs.enableColoredIcons and (
-            tool_objname in [_SP_PAINT_NAME, _SP_PHYSPAINT_NAME]
-        ):
+        # Paint and Physical Paint tools
+        if tool_objname in [_SP_PAINT_NAME, _SP_PHYSPAINT_NAME]:
             if tool_objname == _SP_PAINT_NAME:
                 prefix, subset = "paint", _SP_BRUSH_TOOL_CONFIG["paint"]
             else:
@@ -446,19 +546,21 @@ class SPPlugin(RPCBasePlugin):
                 match = find_closest(
                     rgb, self.prefs.useEvocativeNames, icon_subset=subset
                 )
-                self.details.small_icon = f"{prefix}_{match.icon_key_suffix}"
+                if self.prefs.enableColoredIcons:
+                    self.details.small_icon = f"{prefix}_{match.icon_key_suffix}"
+                else:
+                    self.details.small_icon = tool_objname.lower()
                 self.details.small_icon_text = (
                     f"Painting in {match.display_name} ({match.user_hex})"
                 )
-        # No colored icons, or not Paint/Physical Paint tools
-        else:
-            self.details.small_icon = tool_objname.lower()
-            self.details.small_icon_text = tool_text.title()
-            mat = ctx.get_brush_material()
-            if mat is not None and (
-                tool_objname in [_SP_PAINT_NAME, _SP_PHYSPAINT_NAME]
-            ):
+                return
+            elif (mat := ctx.get_brush_material()) is not None:
+                self.details.small_icon = tool_objname.lower()
                 self.details.small_icon_text = f"Painting in {mat}"
+                return
+        # No colored icons, or not Paint/Physical Paint tools
+        self.details.small_icon = tool_objname.lower()
+        self.details.small_icon_text = tool_text.title()
 
     def update_large_icon(self, ctx):  # pylint: disable=unused-argument
         if self.prefs.displayVersion:
@@ -469,19 +571,34 @@ class SPPlugin(RPCBasePlugin):
             self.details.large_icon_text = "Adobe Substance 3D Painter"
 
     def update_details(self, ctx):
-        if (
-            self.prefs.enableDetails
-            and self.prefs.bakingDetails
-            and self.session.is_rendering
+        # Baking / rendering UI panes: the user's configured detailsType may
+        # depend on the active stack, which is None here. Force the details slot
+        # to the project name so the display stays informative.
+        if self.prefs.enableDetails and (
+            (self.prefs.bakingDetails and self.session.is_rendering)
+            or ctx.ui_mode in _UI_MODE_STATE
         ):
-            proj_name = sp.project.name()
-            if not proj_name:
-                proj_name = "Unsaved Project"
-            self.details.details_text = (
-                f"Baking {proj_name}: {self.session.rendered_frames}%"
+            self.details.details_text = ctx.get_project_name()
+            return
+        super().update_details(ctx)
+
+    def update_state(self, ctx):
+        # Baking / rendering UI panes: the state slot describes what phase of
+        # work the user is in ("Adjusting baking settings", "Previewing in
+        # IRay"). During an actual bake we display bake progress.
+        if self.prefs.enableState and self.prefs.bakingDetails and self.session.is_rendering:
+            self.details.state_text = (
+                f"Baking: {self.session.rendered_frames}% complete"
             )
-        else:
-            super().update_details(ctx)
+            return
+        if (
+            self.prefs.enableState
+            and not self.session.is_rendering
+            and ctx.ui_mode in _UI_MODE_STATE
+        ):
+            self.details.state_text = _UI_MODE_STATE[ctx.ui_mode]
+            return
+        super().update_state(ctx)
 
 
 SP_PLUGIN = SPPlugin()
@@ -491,8 +608,7 @@ SP_PLUGIN = SPPlugin()
 # GUI Settings Menu #
 #####################
 
-SP_STOP_ACTION: QtG.QAction | None = None
-SP_START_ACTION: QtG.QAction | None = None
+_MENU_OBJNAME = "substancepainterpresence.menu"
 
 
 def sp_close_settings_menu():
@@ -504,46 +620,21 @@ def sp_close_settings_menu():
             pass
 
 
-def sp_pause_presence():
-    SP_PLUGIN.prefs.generalEnable = False
-    SP_PLUGIN.prefs.flush()
-    if SP_START_ACTION is not None:
-        SP_START_ACTION.setEnabled(True)
-    if SP_STOP_ACTION is not None:
-        SP_STOP_ACTION.setEnabled(False)
-
-
-def sp_restart_presence():
-    SP_PLUGIN.prefs.generalEnable = True
-    SP_PLUGIN.prefs.flush()
-    if SP_START_ACTION is not None:
-        SP_START_ACTION.setEnabled(False)
-    if SP_STOP_ACTION is not None:
-        SP_STOP_ACTION.setEnabled(True)
-
-
-def _sp_find_discord_action(menu_bar):
-    """Walk the menu bar's actions and return the one titled "Discord", or None.
-    A stale wrapper on any action can raise RuntimeError ("Internal C++ object
-    already deleted"); skip those and keep looking.
-    """
+def get_menu_action():
     try:
-        actions = menu_bar.actions()
-    except RuntimeError:
+        window = sp.ui.get_main_window()
+        menu_bar = window.menuBar()
+        actions = {action.objectName(): action for action in menu_bar.actions()}
+        discord_action = actions.get(_MENU_OBJNAME)
+        return discord_action
+    except (sp.exception.ServiceNotFoundError, RuntimeError):  # type: ignore #fmt: skip
         return None
-    for action in actions:
-        try:
-            if action.text() == "Discord":
-                return action
-        except RuntimeError:
-            continue
-    return None
 
 
-def _sp_remove_discord_menu(menu_bar):
+def _sp_remove_discord_menu(menu_bar: QtW.QMenuBar):
     """Remove the Discord submenu from `menu_bar` if present. Safe to call
     when no such submenu exists."""
-    action = _sp_find_discord_action(menu_bar)
+    action = get_menu_action()
     if action is None:
         return
     try:
@@ -564,26 +655,26 @@ def _sp_remove_discord_menu(menu_bar):
 def sp_open_settings_menu():
     try:
         SP_PLUGIN.show_qt_window("Painter", sp.ui.get_main_window())
-    except sp.exception.ServiceNotFoundError: # pyright: ignore[reportGeneralTypeIssues]
+    except sp.exception.ServiceNotFoundError:  # pyright: ignore[reportGeneralTypeIssues]
         pass
 
 
 def sp_install_settings_menu():
     try:
-        global SP_START_ACTION, SP_STOP_ACTION
         main_window = sp.ui.get_main_window()
         menu_bar = main_window.menuBar()
         # If a previous load left a Discord menu, strip it before
         # adding a new one so reloads don't stack duplicates.
         _sp_remove_discord_menu(menu_bar)
         plugin_menu = menu_bar.addMenu("Discord")
+        # The menu bar exposes each submenu as its menuAction(); get_menu_action
+        # looks these up by objectName. Setting it on the QMenu itself is not
+        # enough — the menuAction is a distinct QObject with its own (empty)
+        # objectName, so the dedup lookup would silently miss and reloads would
+        # stack duplicate "Discord" menus.
+        plugin_menu.menuAction().setObjectName(_MENU_OBJNAME)
         settings_action = plugin_menu.addAction("Settings")
         settings_action.triggered.connect(sp_open_settings_menu)
-        SP_STOP_ACTION = plugin_menu.addAction("Pause Presence")
-        SP_START_ACTION = plugin_menu.addAction("Restart Presence")
-        SP_START_ACTION.setEnabled(False)
-        SP_START_ACTION.triggered.connect(sp_restart_presence)
-        SP_STOP_ACTION.triggered.connect(sp_pause_presence)
         SP_PLUGIN.menubar_item = plugin_menu
     except Exception as e:
         sp.logging.warning(f"[PainterPresence] Unable to install settings menu: {e}")
