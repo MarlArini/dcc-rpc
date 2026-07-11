@@ -5,6 +5,7 @@ from . import qtforpythonuimgrwrapper  # noqa: F401
 from . import sbs  # noqa: F401
 from . import sdbasetypes  # noqa: F401
 from . import sdvaluestring  # noqa: F401
+from . import sdvalueint2
 
 
 class SDGraph:

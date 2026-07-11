@@ -4,7 +4,7 @@
 - Select the downloaded ZIP
 
 ## Accessing Settings
-A new 'Discord' dropdown will be added to the toolbar. Click it and select 'Settings' to access the GUI settings menu. You can also pause and restart RPC updates from the dropdown.
+A new 'Discord' dropdown will be added to the toolbar. Click it and select 'Settings' to access the GUI settings menu.
 
 ## Settings & Features
 #### State and Details allow you to choose from:

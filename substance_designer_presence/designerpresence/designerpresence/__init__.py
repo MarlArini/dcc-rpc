@@ -11,8 +11,6 @@ from pathlib import Path
 import time
 from typing import Any, Callable, ClassVar, Dict, List, Tuple, cast
 
-import PySide6.QtGui as QtG
-
 # pylint: disable=import-error
 import sd
 import sd.api
@@ -84,7 +82,7 @@ class SPContext:
 
     def package_name(self) -> str:
         path = self.package.getFilePath()
-        return f"Package: {Path(path).name}" if path else "Unsaved Package"
+        return Path(path).name if path else "Unsaved Package"
 
     def graph_name(self) -> str:
         v = self.graph.getAnnotationPropertyValueFromId("identifier")
@@ -104,6 +102,12 @@ class SPContext:
         if definition is None:
             return None
         return definition.getLabel()
+
+    def formatted_node_name(self) -> str | None:
+        n = self.node_name()
+        if not n:
+            return None
+        return f"Editing a {n} node"
 
     def num_nodes(self) -> str:
         count = self.graph.getNodes().getSize()
@@ -127,10 +131,10 @@ class SPContext:
         output_size = self.graph.getInputPropertyValueFromId("$outputsize")
         if output_size is None:
             return None
-        output_size = cast(sd.api.sdbasetypes.int2, output_size)
+        output_size = cast(sd.api.sdbasetypes.int2, output_size).get()
         w = int(parent_size[0] * pow(2, output_size.x))
         h = int(parent_size[1] * pow(2, output_size.y))
-        return f"{w}x{h}"
+        return f"Export resolution: {w}x{h}"
 
     def material_model(self) -> str | None:
         v = self.graph.getAnnotationPropertyValueFromId("material_model")
@@ -176,7 +180,7 @@ class SPPlugin(RPCBasePlugin):
     display_types: ClassVar[Dict[str, Callable]] = {
         "package": lambda ctx: ctx.package_name(),
         "graph": lambda ctx: ctx.graph_name(),
-        "active_node": lambda ctx: ctx.node_name(),
+        "active_node": lambda ctx: ctx.formatted_node_name(),
         "node_count": lambda ctx: ctx.num_nodes(),
         "out_node_count": lambda ctx: ctx.num_output_nodes(),
         "resolution": lambda ctx: ctx.output_resolution(),
@@ -258,9 +262,7 @@ SP_PLUGIN = SPPlugin()
 # GUI Settings Menu #
 #####################
 
-SP_STOP_ACTION: QtG.QAction | None = None
-SP_START_ACTION: QtG.QAction | None = None
-
+_MENU_OBJNAME = "designerpresence.discordmenu"
 
 def sp_close_settings_menu():
     if (window := SP_PLUGIN.settings_window) is not None:
@@ -272,7 +274,6 @@ def sp_close_settings_menu():
 
 
 def sp_open_settings_menu():
-    sp_close_settings_menu()
     if (uimgr := SP_PLUGIN.uimgr) is None or (
         main_window := uimgr.getMainWindow()
     ) is None:
@@ -280,37 +281,14 @@ def sp_open_settings_menu():
     SP_PLUGIN.show_qt_window("Designer", main_window)
 
 
-def sp_pause_presence():
-    SP_PLUGIN.prefs.generalEnable = False
-    SP_PLUGIN.prefs.flush()
-    if SP_START_ACTION is not None:
-        SP_START_ACTION.setEnabled(True)
-    if SP_STOP_ACTION is not None:
-        SP_STOP_ACTION.setEnabled(False)
-
-
-def sp_restart_presence():
-    SP_PLUGIN.prefs.generalEnable = True
-    SP_PLUGIN.prefs.flush()
-    if SP_START_ACTION is not None:
-        SP_START_ACTION.setEnabled(False)
-    if SP_STOP_ACTION is not None:
-        SP_STOP_ACTION.setEnabled(True)
-
-
 def _sp_find_discord_action(menu_bar):
-    """Walk the menu bar's actions and return the one titled "Discord", or None.
-
-    Defensive: a stale wrapper on any action can raise RuntimeError on .text()
-    ("Internal C++ object already deleted"); skip those and keep looking.
-    """
     try:
         actions = menu_bar.actions()
     except RuntimeError:
         return None
     for action in actions:
         try:
-            if action.text() == "Discord":
+            if action.objectName() == _MENU_OBJNAME:
                 return action
         except RuntimeError:
             continue
@@ -347,14 +325,9 @@ def sp_install_settings_menu():
     menu_bar = main_window.menuBar()
     _sp_remove_discord_menu(menu_bar)
     plugin_menu = menu_bar.addMenu("Discord")
+    plugin_menu.menuAction().setObjectName(_MENU_OBJNAME)
     settings_action = plugin_menu.addAction("Settings")
     settings_action.triggered.connect(sp_open_settings_menu)
-    global SP_START_ACTION, SP_STOP_ACTION
-    SP_STOP_ACTION = plugin_menu.addAction("Pause Presence")
-    SP_START_ACTION = plugin_menu.addAction("Restart Presence")
-    SP_START_ACTION.setEnabled(False)
-    SP_START_ACTION.triggered.connect(sp_restart_presence)
-    SP_STOP_ACTION.triggered.connect(sp_pause_presence)
     SP_PLUGIN.menubar_item = plugin_menu
 
 

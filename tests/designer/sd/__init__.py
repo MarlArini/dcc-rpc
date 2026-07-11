@@ -39,6 +39,14 @@ class _SDValueString:
 
 
 @dataclass
+class _SDValueInt2:
+    _value: _Int2 = field(default_factory=_Int2)
+
+    def get(self) -> _Int2:
+        return self._value
+
+
+@dataclass
 class _NodeDefinition:
     _label: str = "Uniform color"
 
@@ -285,6 +293,10 @@ def make_value_string(value: str) -> _SDValueString:
     return _SDValueString(_value=value)
 
 
+def make_value_int2(x: int = 0, y: int = 0) -> _SDValueInt2:
+    return _SDValueInt2(_value=_Int2(x, y))
+
+
 def make_node_definition(label: str = "Uniform color") -> _NodeDefinition:
     return _NodeDefinition(_label=label)
 
@@ -333,6 +345,7 @@ def make_graph(
 api._Graph = _Graph
 api._Int2 = _Int2
 api._SDValueString = _SDValueString
+api._SDValueInt2 = _SDValueInt2
 api._SDArray = _SDArray
 api._Package = _Package
 api._Resource = _Resource

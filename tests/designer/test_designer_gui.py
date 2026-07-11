@@ -33,7 +33,6 @@ from designerpresence import (
     SP_PLUGIN, SPSettings,
     sp_install_settings_menu, sp_uninstall_settings_menu,
     sp_open_settings_menu, sp_close_settings_menu,
-    sp_pause_presence, sp_restart_presence,
 )
 import designerpresence as dp
 
@@ -69,16 +68,12 @@ def menu_state_clean():
     snap = (
         SP_PLUGIN.menubar_item,
         SP_PLUGIN.settings_window,
-        SP_PLUGIN.prefs.generalEnable,
-        dp.SP_START_ACTION,
-        dp.SP_STOP_ACTION,
+        SP_PLUGIN.prefs.generalEnable
     )
     yield
     (SP_PLUGIN.menubar_item,
      SP_PLUGIN.settings_window,
      SP_PLUGIN.prefs.generalEnable) = snap[:3]
-    dp.SP_START_ACTION = snap[3]
-    dp.SP_STOP_ACTION = snap[4]
 
 
 @pytest.fixture
@@ -122,37 +117,21 @@ def test_install_settings_menu_adds_three_actions(real_main_window, menu_state_c
     sp_install_settings_menu()
     assert SP_PLUGIN.menubar_item is not None
     action_texts = [a.text() for a in SP_PLUGIN.menubar_item.actions()]
-    assert action_texts == ["Settings", "Pause Presence", "Restart Presence"]
-
-
-def test_install_initial_action_enabled_states(real_main_window, menu_state_clean):
-    """Start (Restart) action is disabled at install; Stop (Pause) is enabled."""
-    sp_install_settings_menu()
-    assert dp.SP_START_ACTION is not None
-    assert dp.SP_STOP_ACTION is not None
-    assert dp.SP_START_ACTION.isEnabled() is False
-    assert dp.SP_STOP_ACTION.isEnabled() is True
-
+    assert action_texts == ["Settings"]
 
 def test_install_short_circuits_when_main_window_none(monkeypatch, menu_state_clean):
     """When getMainWindow returns None the function logs and returns early —
     no menubar mutation, no SP_START/STOP assignment."""
     monkeypatch.setattr(SP_PLUGIN.uimgr, "getMainWindow", lambda: None)
-    dp.SP_START_ACTION = None
-    dp.SP_STOP_ACTION = None
     SP_PLUGIN.menubar_item = None
     sp_install_settings_menu()
     assert SP_PLUGIN.menubar_item is None
-    assert dp.SP_START_ACTION is None
-    assert dp.SP_STOP_ACTION is None
-
 
 def test_install_short_circuits_when_uimgr_none(monkeypatch, menu_state_clean):
     monkeypatch.setattr(SP_PLUGIN, "uimgr", None)
     SP_PLUGIN.menubar_item = None
     sp_install_settings_menu()
     assert SP_PLUGIN.menubar_item is None
-
 
 def test_uninstall_settings_menu_removes_discord_menu(
     real_main_window, menu_state_clean
@@ -218,54 +197,6 @@ def test_install_strips_preexisting_discord_menu(real_main_window, menu_state_cl
         a for a in real_main_window.menuBar().actions() if a.text() == "Discord"
     ]
     assert len(discord_actions) == 1
-
-
-# ---------------------------------------------------------------------------
-# pause_presence / restart_presence
-# ---------------------------------------------------------------------------
-
-
-def test_pause_presence_disables_general_enable(real_main_window, menu_state_clean):
-    sp_install_settings_menu()
-    SP_PLUGIN.prefs.generalEnable = True
-    sp_pause_presence()
-    assert SP_PLUGIN.prefs.generalEnable is False
-
-
-def test_pause_presence_toggles_action_enabled_state(
-    real_main_window, menu_state_clean
-):
-    sp_install_settings_menu()
-    sp_pause_presence()
-    assert dp.SP_START_ACTION.isEnabled() is True
-    assert dp.SP_STOP_ACTION.isEnabled() is False
-
-
-def test_restart_presence_enables_general_enable(real_main_window, menu_state_clean):
-    sp_install_settings_menu()
-    SP_PLUGIN.prefs.generalEnable = False
-    sp_restart_presence()
-    assert SP_PLUGIN.prefs.generalEnable is True
-
-
-def test_restart_presence_toggles_action_enabled_state(
-    real_main_window, menu_state_clean
-):
-    sp_install_settings_menu()
-    sp_pause_presence()
-    sp_restart_presence()
-    assert dp.SP_START_ACTION.isEnabled() is False
-    assert dp.SP_STOP_ACTION.isEnabled() is True
-
-
-def test_pause_with_no_actions_does_not_crash(menu_state_clean):
-    """If install never ran (e.g., the host has no menubar) the actions remain
-    None. Pause must guard against that."""
-    dp.SP_START_ACTION = None
-    dp.SP_STOP_ACTION = None
-    SP_PLUGIN.prefs.generalEnable = True
-    sp_pause_presence()
-    assert SP_PLUGIN.prefs.generalEnable is False
 
 
 # ---------------------------------------------------------------------------

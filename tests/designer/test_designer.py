@@ -57,7 +57,7 @@ def test_package_name_from_path(sd):
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
     ctx = SPContext.capture()
-    assert ctx.package_name() == "Package: Fabrics.sbs"
+    assert ctx.package_name() == "Fabrics.sbs"
 
 
 def test_package_name_empty_path_calls_it_unsaved(sd):
@@ -225,32 +225,30 @@ def test_parent_size_for_comp_graph(sd):
 def test_output_resolution_default(sd):
     """outputsize property values are powers-of-2 exponents above parent size."""
     pkg = sd.make_package(file_path="/a.sbs")
-    from sd.api import sdbasetypes
     g = sd.make_graph(
         package=pkg,
         is_comp_graph=True,
         default_parent_size=sd.make_int2(2048, 2048),
-        input_properties={"$outputsize": sdbasetypes.int2(0, 0)},
+        input_properties={"$outputsize": sd.make_value_int2(0, 0)},
     )
     sd.set_state(current_graph=g)
     ctx = SPContext.capture()
     # 2048 * 2^0 = 2048
-    assert ctx.output_resolution() == "2048x2048"
+    assert ctx.output_resolution() == "Export resolution: 2048x2048"
 
 
 def test_output_resolution_scaled(sd):
     pkg = sd.make_package(file_path="/a.sbs")
-    from sd.api import sdbasetypes
     g = sd.make_graph(
         package=pkg,
         is_comp_graph=True,
         default_parent_size=sd.make_int2(1024, 1024),
-        input_properties={"$outputsize": sdbasetypes.int2(1, 2)},
+        input_properties={"$outputsize": sd.make_value_int2(1, 2)},
     )
     sd.set_state(current_graph=g)
     ctx = SPContext.capture()
     # 1024 * 2^1 = 2048; 1024 * 2^2 = 4096
-    assert ctx.output_resolution() == "2048x4096"
+    assert ctx.output_resolution() == "Export resolution: 2048x4096"
 
 
 def test_output_resolution_none_when_property_missing(sd):
