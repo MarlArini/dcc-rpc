@@ -187,7 +187,7 @@ class KPContext:
 
     def active_document_name(self) -> str | None:
         name = cast(kr.Document, self.doc).name()
-        if name is None:  # name comes from document metadata: only exists on .kra files
+        if not name:  # name comes from document metadata: only exists on .kra files
             name = cast(kr.Document, self.doc).fileName()  # try file name instead
             if not name:
                 return None
@@ -221,11 +221,11 @@ class KPContext:
 
     def layer_info(self) -> str:
         al_name = self._active_layer_name()
+        if "layer" not in al_name.lower():
+            al_name = f"Layer: {al_name}"
         al_descendants = self._num_active_layer_descendants()
         if al_descendants == 0:
-            if "layer" in al_name.lower():
-                return al_name
-            return f"Layer: {al_name}"
+            return al_name
         return f"{al_name} ({kp_plural(al_descendants, 'sublayer')})"
 
     # From KnowZero on the Krita Forums: https://krita-artists.org/t/active-tool-request/78904
@@ -274,7 +274,7 @@ class KPContext:
         return cast(kr.Document, self.doc).colorProfile()
 
     def color_info(self) -> str:
-        return f"{self._color_model()} ({self._color_profile()})"
+        return f"Color Model: {self._color_model()} ({self._color_profile()})"
 
     def _active_document_dimensions(self) -> Tuple[int, int]:
         w = cast(kr.Document, self.doc).width()
@@ -309,7 +309,7 @@ class KPContext:
         tool_name = KP_TOOL_MAPPING.get(name, None)
         tool_blend_mode = self.view_blend_mode()
         if tool_blend_mode.lower() != "normal":
-            return f"{tool_name} ({tool_blend_mode})"
+            return f"Using {tool_name} ({tool_blend_mode})"
         return tool_name
 
     def layer_blend_mode(self) -> str | None:
@@ -331,21 +331,40 @@ class KPPlugin(RPCBasePlugin):
         "color_info": lambda ctx: ctx.color_info(),
         "dimensions": lambda ctx: ctx.active_document_dimensions(),
         "layer_blend": lambda ctx: ctx.layer_blend_mode(),
-        "document_time": lambda ctx: KPPlugin.doc_time(ctx),  # pylint: disable=unnecessary-lambda
+        "document_time": lambda ctx: KPPlugin.doc_time(),  # pylint: disable=unnecessary-lambda
     }
     display_cycle: ClassVar[List[str]] = list(display_types.keys())
-    doc_times: ClassVar[Dict[int, int]] = {}
+    doc_times: ClassVar[Dict[str, int]] = {}
     idle_monitor = IdleDetector()
 
     @staticmethod
-    def doc_time(ctx: KPContext):
+    def doc_id() -> str | None:
+        """id(doc) is not stable in a session; presumably doc wrappers
+        are frequently created and destroyed. What appears to be stable
+        is to fetch the root of the document's node hierarchy and then
+        to retrieve the QUuid of that node."""
+        instance = kr.Krita.instance()
+        if not instance:
+            return None
+        doc = instance.activeDocument()
+        if not doc:
+            return None
+        root_node = doc.rootNode()
+        return root_node.uniqueId().toString()
+
+
+    @staticmethod
+    def doc_time():
         """Check the internal document-time map for how long a document was open
         and for whether the user is idle."""
-        t = KPPlugin.doc_times.get(id(ctx.doc), None)
+        doc_id = KPPlugin.doc_id()
+        if not doc_id:
+            return None
+        t = KPPlugin.doc_times.get(doc_id, None)
         if t is None:
             return None
         t_conv = (t // 3600, (t % 3600) // 60)
-        t_formatted = f"{t_conv[0]}h {t_conv[1]}m" if t_conv[0] else (f"{t_conv[1]}m")
+        t_formatted = f"{t_conv[0]}h {t_conv[1]}m" if t_conv[0] else kp_plural(t_conv[1], 'minute')
         if KPPlugin.idle_monitor.is_idle():
             return f"Document time: {t_formatted} (Idle)"
         return f"Document time: {t_formatted}"
@@ -389,13 +408,14 @@ class KPPlugin(RPCBasePlugin):
         doc_time = ET.fromstring(doc_xml)[0].find(
             "{http://www.calligra.org/DTD/document-info}editing-time"
         )
+        doc_id = doc.rootNode().uniqueId().toString()
         if doc_time is None or doc_time.text is None:
-            self.doc_times[id(doc)] = 0
+            self.doc_times[doc_id] = 0
         else:
             try:
-                self.doc_times[id(doc)] = int(doc_time.text)
+                self.doc_times[doc_id] = int(doc_time.text)
             except (ValueError, TypeError):  # fmt:skip
-                self.doc_times[id(doc)] = 0
+                self.doc_times[doc_id] = 0
 
     def update_small_icon(self, ctx: KPContext):  # pylint: disable=unused-argument
         self.details.small_icon = None
@@ -425,15 +445,14 @@ class KPPlugin(RPCBasePlugin):
             self.details.large_icon_text = "Krita"
 
     def update_presence(self):
-        instance = kr.Krita.instance()
-        if instance is not None:
-            doc = instance.activeDocument()
-            if doc is not None and not self.idle_monitor.is_idle():
-                if id(doc) in self.doc_times:
-                    self.doc_times[id(doc)] += self.prefs.generalUpdate
-                else:
-                    self.doc_times[id(doc)] = self.prefs.generalUpdate
+        doc_id = KPPlugin.doc_id()
+        if doc_id and not self.idle_monitor.is_idle():
+            if doc_id in self.doc_times:
+                self.doc_times[doc_id] += self.prefs.generalUpdate
+            else:
+                self.doc_times[doc_id] = self.prefs.generalUpdate
         return super().update_presence()
+
 
 
 class KPExtension(kr.Extension):
@@ -461,7 +480,6 @@ class KPExtension(kr.Extension):
                 pass
 
     def open_settings_menu(self):
-        self.close_settings_menu()
         instance = kr.Krita.instance()
         if instance is None:
             return

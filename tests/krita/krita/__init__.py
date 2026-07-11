@@ -25,11 +25,20 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 
 @dataclass
+class _QUuid:
+    _uuid_str: str
+
+    def toString(self) -> str:  # noqa: N802
+        return self._uuid_str
+
+
+@dataclass
 class _Node:
     _name: str = "Layer 1"
     _blend: str = "Normal"
     _children: List["_Node"] = field(default_factory=list)
     _visible: bool = True
+    _unique_id: str = "uuid-placeholder"
 
     def name(self) -> str:
         return self._name
@@ -43,6 +52,9 @@ class _Node:
     def get_visible(self) -> bool:
         return self._visible
 
+    def uniqueId(self) -> _QUuid:  # noqa: N802
+        return _QUuid(self._unique_id)
+
 
 @dataclass
 class _Document:
@@ -54,6 +66,7 @@ class _Document:
     _width: int = 1920
     _height: int = 1080
     _resolution: int = 72
+    _root_node: Optional[_Node] = None
     _document_info_xml: str = (
         '<?xml version="1.0"?>'
         '<document-info xmlns="http://www.calligra.org/DTD/document-info">'
@@ -87,6 +100,11 @@ class _Document:
 
     def documentInfo(self) -> str:  # noqa: N802
         return self._document_info_xml
+
+    def rootNode(self) -> _Node:  # noqa: N802
+        if self._root_node is None:
+            self._root_node = _Node(_unique_id=f"doc-{id(self)}")
+        return self._root_node
 
 
 @dataclass
@@ -279,8 +297,9 @@ def get_settings_storage() -> Dict[Tuple[str, str], str]:
 # ---------------------------------------------------------------------------
 
 def make_node(name: str = "Layer 1", blend: str = "Normal",
-              children: Optional[List[_Node]] = None, visible: bool = True) -> _Node:
-    return _Node(_name=name, _blend=blend, _children=children or [], _visible=visible)
+              children: Optional[List[_Node]] = None, visible: bool = True,
+              unique_id: str = "uuid-placeholder") -> _Node:
+    return _Node(_name=name, _blend=blend, _children=children or [], _visible=visible, _unique_id=unique_id)
 
 
 def make_document(name: str = "Unnamed",
@@ -290,7 +309,8 @@ def make_document(name: str = "Unnamed",
                   color_profile: str = "sRGB-elle-V2-srgbtrc.icc",
                   width: int = 1920, height: int = 1080,
                   resolution: int = 72,
-                  document_info_xml: Optional[str] = None) -> _Document:
+                  document_info_xml: Optional[str] = None,
+                  root_node: Optional[_Node] = None) -> _Document:
     kwargs = dict(
         _name=name,
         _top_level_nodes=top_level_nodes or [],
@@ -298,6 +318,7 @@ def make_document(name: str = "Unnamed",
         _color_model=color_model,
         _color_profile=color_profile,
         _width=width, _height=height, _resolution=resolution,
+        _root_node=root_node,
     )
     if document_info_xml is not None:
         kwargs["_document_info_xml"] = document_info_xml

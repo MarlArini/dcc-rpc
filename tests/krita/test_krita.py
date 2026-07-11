@@ -198,7 +198,7 @@ def test_layer_info_with_sublayers(kr):
     )
     # _recurse_count counts the active node itself + its descendants. Plugin
     # subtracts 1 so "sublayers" is just descendants. 3 children = 3 sublayers.
-    assert ctx.layer_info() == "Group 1 (3 sublayers)"
+    assert ctx.layer_info() == "Layer: Group 1 (3 sublayers)"
 
 
 def test_layer_blend_mode_normal_returns_none(kr):
@@ -238,7 +238,7 @@ def test_color_info(kr):
         window=kr.make_window(),
         view=kr.make_view(),
     )
-    assert ctx.color_info() == "RGBA (sRGB-elle-V2-srgbtrc.icc)"
+    assert ctx.color_info() == "Color Model: RGBA (sRGB-elle-V2-srgbtrc.icc)"
 
 
 @pytest.mark.parametrize(
@@ -431,7 +431,7 @@ def test_on_file_open_skips_reset_when_pref_unset(kr, kp_plugin):
 def test_on_file_open_editing_time(kr, kp_plugin, about_inner, expected):
     doc = _make_doc_with_editing_time(kr, name="X", about_inner=about_inner)
     kp_plugin._on_file_open(doc)
-    assert KPPlugin.doc_times.get(id(doc)) == expected
+    assert KPPlugin.doc_times.get(doc.rootNode().uniqueId().toString()) == expected
 
 
 # --- doc_time (formatter) ---
@@ -444,15 +444,15 @@ def test_doc_time_returns_none_when_no_record(kr, kp_plugin):
     ctx = KPContext(
         instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
     )
-    assert KPPlugin.doc_time(ctx) is None
+    assert KPPlugin.doc_time() is None
 
 
 @pytest.mark.parametrize(
     "seconds, expected",
     [
-        (0, "0m"),
-        (60, "1m"),
-        (1800, "30m"),
+        (0, "0 minutes"),
+        (60, "1 minute"),
+        (1800, "30 minutes"),
         (3600, "1h 0m"),
         (3720, "1h 2m"),
         (7320, "2h 2m"),
@@ -464,10 +464,11 @@ def test_doc_time_formats_hours_and_minutes(kr, kp_plugin, seconds, expected):
     ctx = KPContext(
         instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
     )
-    KPPlugin.doc_times[id(doc)] = seconds
+    kr.set_state(active_document=doc)
+    KPPlugin.doc_times[doc.rootNode().uniqueId().toString()] = seconds
     # Force not idle so we get the clean "Document time: …" form.
     KPPlugin.idle_monitor._last_input = _time.time()
-    out = KPPlugin.doc_time(ctx)
+    out = KPPlugin.doc_time()
     assert out == f"Document time: {expected}"
 
 
@@ -477,13 +478,14 @@ def test_doc_time_appends_idle_marker(kr, kp_plugin):
     ctx = KPContext(
         instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
     )
-    KPPlugin.doc_times[id(doc)] = 120
+    kr.set_state(active_document=doc)
+    KPPlugin.doc_times[doc.rootNode().uniqueId().toString()] = 120
     # Force idle by pushing _last_input far into the past.
     KPPlugin.idle_monitor._last_input = _time.time() - 10_000
-    out = KPPlugin.doc_time(ctx)
+    out = KPPlugin.doc_time()
     assert out is not None
     assert "(Idle)" in out
-    assert "2m" in out
+    assert "2 minutes" in out
 
 
 # --- update_small_icon ---
@@ -832,4 +834,4 @@ def test_tool_info_non_normal_blend_appended(kr):
     ctx = KPContext(
         instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
     )
-    assert ctx.tool_info() == "Freehand Brush Tool (Multiply)"
+    assert ctx.tool_info() == "Using Freehand Brush Tool (Multiply)"
