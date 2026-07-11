@@ -1,6 +1,6 @@
 """
 NukePresence is a Discord Rich Presence client plugin for The Foundry's Nuke,
-NukeX, and NukeStudio. NukePresence has been tested on Nuke[s] 17.0.1.
+NukeX, and NukeStudio. NukePresence has been tested on Nuke[s] 17.0.2.
 For more info, see https://github.com/MarlArini/dcc-rpc.
 """
 
@@ -49,6 +49,7 @@ if _HERE not in sys.path:
 # Globals #
 ###########
 
+NK_IS_COMMERCIAL = not (nuke.env.get("indie") or nuke.env.get("nc"))
 
 @dataclass
 class NKSettings(SharedSettings, JSONSharedSettings):
@@ -62,6 +63,15 @@ class NKSettings(SharedSettings, JSONSharedSettings):
         ("Layer count", "num_layers"),
         ("Frame info", "frame"),
         ("Viewer info (commercial)", "viewer_info"),
+        ("Color management", "color_management"),
+        ("Comp name", "comp_name"),
+        ("Format", "format"),
+        ("Proxy info", "scaling"),
+    ] if NK_IS_COMMERCIAL else [
+        ("Memory usage", "memory_usage"),
+        ("Node count", "num_nodes"),
+        ("Layer count", "num_layers"),
+        ("Frame info", "frame"),
         ("Color management", "color_management"),
         ("Comp name", "comp_name"),
         ("Format", "format"),
@@ -83,16 +93,6 @@ class NKSettings(SharedSettings, JSONSharedSettings):
         default=True,
         metadata={"group": "Details", "label": "Display frames rendered in details"},
     )
-
-
-# This plugin was originally written based on a misreading of the Non-commercial and
-# Indie Python API restrictions, in which I believed it was possible to repeatedly
-# query nodes but that only the first 10 results to any query would be returned. Thus
-# there are methods throughout the file to find the selected node and display its icon
-# or to query the node being viewed in a Viewer. However, a Non-commercial or Indie user
-# can only query 10 nodes throughout the entire lifetime of a Nuke session. Thus all of
-# the node-related code has been temporarily turned into string statements until/unless
-# the API is updated such that it allows more than 10 node queries.
 
 
 # pylint: disable=line-too-long
@@ -124,7 +124,6 @@ NK_ICONS = [
 # fmt:on
 # pylint: enable=line-too-long
 NK_PREFS = NKSettings()
-NK_IS_COMMERCIAL = not (nuke.env.get("indie") or nuke.env.get("nc"))
 NK_RPC_CLIENT = Presence("1503841982743707718")
 NK_UPDATE_DETAILS = RPCUpdateDetails("nuke")
 NK_SESSION = SessionInfo()
@@ -324,24 +323,33 @@ def nk_handle_active_node(ctx: NKContext) -> str | None:
         return None
 
 
-NK_DISPLAY_TYPES = {
-    "memory_usage": lambda ctx: ctx.get_memory_usage(),
-    "num_nodes": lambda ctx: ctx.get_num_nodes(),
-    "active_node": nk_handle_active_node,
-    "io_nodes": lambda ctx: ctx.get_io_nodes(),
-    "num_layers": lambda ctx: ctx.get_num_layers(),
-    "frame": lambda ctx: ctx.get_frame_info(),
-    "viewer_info": lambda ctx: ctx.get_viewer_str(),
-    "color_management": lambda ctx: ctx.get_color_management(),
-    "comp_name": lambda ctx: ctx.get_comp_name(),
-    "format": lambda ctx: ctx.get_format_str(),
-    "scaling": lambda ctx: ctx.get_scaling_info(),
-}
+if NK_IS_COMMERCIAL:
+    NK_DISPLAY_TYPES = {
+        "memory_usage": lambda ctx: ctx.get_memory_usage(),
+        "num_nodes": lambda ctx: ctx.get_num_nodes(),
+        "active_node": nk_handle_active_node,
+        "io_nodes": lambda ctx: ctx.get_io_nodes(),
+        "num_layers": lambda ctx: ctx.get_num_layers(),
+        "frame": lambda ctx: ctx.get_frame_info(),
+        "viewer_info": lambda ctx: ctx.get_viewer_str(),
+        "color_management": lambda ctx: ctx.get_color_management(),
+        "comp_name": lambda ctx: ctx.get_comp_name(),
+        "format": lambda ctx: ctx.get_format_str(),
+        "scaling": lambda ctx: ctx.get_scaling_info(),
+    }
+else:
+    NK_DISPLAY_TYPES = {
+            "memory_usage": lambda ctx: ctx.get_memory_usage(),
+            "num_nodes": lambda ctx: ctx.get_num_nodes(),
+            "num_layers": lambda ctx: ctx.get_num_layers(),
+            "frame": lambda ctx: ctx.get_frame_info(),
+            "color_management": lambda ctx: ctx.get_color_management(),
+            "comp_name": lambda ctx: ctx.get_comp_name(),
+            "format": lambda ctx: ctx.get_format_str(),
+            "scaling": lambda ctx: ctx.get_scaling_info(),
+    }
 
 
-# Nuke does not provide a way to get the frame range of what's actually rendering
-# since it happens through an execute dialog/function which doesn't get hooked
-# This is just an approximation.
 def nk_update_presence_details(ctx):
     NK_UPDATE_DETAILS.details_text = ""
     # Rendering Details
