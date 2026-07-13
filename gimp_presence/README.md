@@ -6,7 +6,7 @@
 - The plugin starts automatically; check Filters -> Discord Presence to confirm the menu is present
 
 ## Accessing Settings
-A new 'Discord Presence' submenu will be added under Filters. From it you can open the GUI settings menu, toggle Rich Presence updates, and pin or unpin an image (see "Pinning the Active Image" below).
+A new 'Discord Presence' submenu will be added under Filters. From it you can open the GUI settings menu and pin or unpin an image (see "Pinning the Active Image" below).
 
 ## Settings & Features
 #### State and Details allow you to choose from:
@@ -28,15 +28,15 @@ Enabling colored icons will also create a tooltip on the icon with a name for th
 
 ## Finding the Active Image
 
-> **Quick read:** If you're on Windows and haven't changed the **Title format** under Edit -> Preferences -> Image Windows -> Title & Statusbar, this just works. You can stop reading here.
+> **Quick read:** If you're on Windows and haven't changed the **Title format** under Edit -> Preferences -> Image Windows -> Title & Statusbar, this should just work. You can stop reading here.
 
-GIMP 3's Python API does not directly expose which image is currently focused/active. The plugin runs a series of workaround detection strategies, stopping as soon as one succeeds.
+GIMP 3's Python API does not directly expose which image is currently focused/active. If no image is pinned, the plugin runs a series of workaround detection strategies, stopping as soon as one succeeds.
 
 #### 1. Only one image open
 If there is only a single image open, that image is the active image.
 
 #### 2. Window title query (currently only works on Windows)
-If more than one image is open, the plugin tries to find the active GIMP window's title and extract the image name from it. This should work as long as the title format for the application hasn't been changed from the default.
+If more than one image is open, the plugin tries to find the active GIMP window's title and extract the image name from it. This *should* work as long as the title format for the application hasn't been changed from the default.
 
 This step is currently **Windows-only**:
 - **macOS**: may be implemented eventually, but not currently in development; I don't have a MacOS device to develop or test on.

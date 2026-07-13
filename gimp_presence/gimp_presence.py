@@ -11,7 +11,6 @@ import json
 import os
 from pathlib import Path
 import platform
-import re
 import subprocess
 import sys
 import time
@@ -37,6 +36,7 @@ from common import (  # noqa: E402
     connect_rpc,
     update_slot,
     update_buttons,
+    advance_cycle
 )
 from colors import find_closest as gp_find_closest_color  # noqa: E402
 from settings_dialog import SETTINGS_PROC_NAME, build_settings_procedure, _gp_warn  # noqa: E402
@@ -48,7 +48,6 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-_GP_PATTERN = re.compile(r"\[(\w+)\]")
 _GP_PREFS_PATH = Path(Gimp.directory()) / "plug-in-settings" / "gimp_presence.json"
 
 _GP_MAIN_LOOP: GLib.MainLoop | None = None
@@ -77,13 +76,6 @@ def gp_unpin_image(procedure, run_mode, image, drawables, config, *data):
     """'Unpin' a previously pinned image. Safe to call if no image is pinned.
     Registered as a temporary procedure method."""
     GP_SESSION.pinned_image = None
-    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
-
-
-def gp_toggle_rpc(procedure, run_mode, image, drawables, config, *data):
-    """Toggle the generalEnable status. Registered as a temporary procedure
-    method."""
-    GP_PREFS.generalEnable = not GP_PREFS.generalEnable
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
 
@@ -181,15 +173,29 @@ def _gp_platform_query_window() -> str | None:
             reader = csv.DictReader(proc_list)
             gimp_process_info = next(reader)
             window_title = gimp_process_info["Window Title"]
-            doc_name = _GP_PATTERN.search(window_title)
-            if doc_name is None:
-                return None
-            return doc_name.group(1)
+
+            # Non-XCF type (e.g., png/jpeg): window title is `[image name] (imported)-...`
+            # Use rfind since brackets are valid characters in file names
+            if ".xcf" not in window_title.lower():
+                name_end = window_title.rfind("]")
+                if name_end == -1 or (
+                    window_title[0] != "[" and not window_title.startswith("*[")
+                ):
+                    return None
+                return (
+                    window_title[(1 if window_title[0] == "*" else 0) : name_end + 1]
+                    + " (imported)"
+                )
+            # XCF type: window title is `image name.xcf-...`
+            else:
+                name_end = window_title.lower().rfind(".xcf")
+                return window_title[(1 if window_title[0] == "*" else 0) : name_end + 4]
+
         except Exception:
             return None
     else:
         # New Linux (e.g., Ubuntu 26.04) uses Wayland, which does not expose window titles
-        # Darwin development requires a MacOS device to even install pyobjc
+        # Darwin development requires a MacOS device
         return None
 
 
@@ -197,11 +203,7 @@ def _gp_match_title(title: str, images: List[Gimp.Image]) -> Gimp.Image | None:
     """Given a title extracted from the window title, try to find an image with
     a matching title in the list of open images."""
     for image in images:
-        image_name = image.get_name()
-        image_name_extracted = _GP_PATTERN.match(image_name)
-        if image_name_extracted is None:
-            continue
-        if title == image_name_extracted.group(1):
+        if image.get_name() == title:
             return image
     return None
 
@@ -337,7 +339,7 @@ class GPContext:
         else:
             layer_name = layers[0].get_name()
             layer_blend_mode = layers[0].get_mode()
-            layer_blend_mode_name = _gp_get_enum_name(layer_blend_mode)
+            layer_blend_mode_name = _gp_get_enum_name(layer_blend_mode).title()
             blend_mode_str = (
                 f" ({layer_blend_mode_name})"
                 if layer_blend_mode_name != "Normal"
@@ -452,7 +454,7 @@ class GPContext:
         return (rgba[0], rgba[1], rgba[2])
 
     def view_blend_mode(self) -> str:
-        return f"Paint mode: {_gp_get_enum_name(Gimp.context_get_paint_mode())}"
+        return f"Paint mode: {_gp_get_enum_name(Gimp.context_get_paint_mode()).title()}"
 
 
 GP_DISPLAY_TYPES: Dict[str, Callable] = {
@@ -505,6 +507,8 @@ def gp_update_presence():
     ctx = GPContext.capture()
     # Update details first so if the doc name field (default) can't find the active document
     # and overrides with the document count, the state field knows to skip it on a cycle
+    if GP_PREFS.detailsCycle or GP_PREFS.stateCycle:
+        advance_cycle(GP_SESSION, GP_DISPLAY_TYPES)
     update_slot(ctx, "details", GP_PREFS, GP_DETAILS, GP_DISPLAY_TYPES, GP_SESSION)
     update_slot(ctx, "state", GP_PREFS, GP_DETAILS, GP_DISPLAY_TYPES, GP_SESSION)
     gp_update_large_icon(ctx)
@@ -532,11 +536,6 @@ _GP_UNPIN_DOC = (
     "Unpin the currently pinned image",
 )
 
-_GP_TOGGLE_DOC = (
-    "Toggle Rich Presence updates on or off",
-    "Toggle Rich Presence updates. A console message will alert you as to whether "
-    + "updates are now on or off.",
-)
 
 _GP_TEMP_PROCEDURES = {
     "gimppresence-pin-image": (gp_pin_image, "GimpPresence: Pin Image", _GP_PIN_DOC),
@@ -544,11 +543,6 @@ _GP_TEMP_PROCEDURES = {
         gp_unpin_image,
         "GimpPresence: Unpin Image",
         _GP_UNPIN_DOC,
-    ),
-    "gimppresence-toggle-rpc": (
-        gp_toggle_rpc,
-        "GimpPresence: Toggle RPC Connection",
-        _GP_TOGGLE_DOC,
     ),
 }
 
@@ -611,7 +605,7 @@ def gp_run(procedure, config, data):  # pylint: disable=unused-argument
 def gp_start_timer():
     global _GP_TIMER_ID
     gp_stop_timer()
-    interval = max(10000, GP_PREFS.generalUpdate * 1000)
+    interval = max(12000, GP_PREFS.generalUpdate * 1000)
     _GP_TIMER_ID = GLib.timeout_add(interval, gp_tick)
 
 

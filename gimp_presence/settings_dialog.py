@@ -3,7 +3,7 @@ GimpPresence settings dialog: rather than a custom GTK dialog, a procedure is re
 which presents all settings options and writes to JSON on save, additionally interrupting
 the main (background) procedure's timer if the generalUpdate field was changed.
 
-Originally AI-generated (Claude Opus 4.7); human-modified and reviewed.
+Originally AI-generated (Claude Opus 4.7)
 """
 
 from __future__ import annotations
@@ -36,10 +36,7 @@ def _gp_warn(message: str):
             and message_handler == Gimp.MessageHandlerType.MESSAGE_BOX
         ):
             return  # Users probably prefer silent RPC failure to a popup that might interrupt work
-        Gimp.message(message)
-        Gimp.message_set_handler(message_handler)  # Restore previous handler
-    else:
-        Gimp.message(message)
+    Gimp.message(message)
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +400,7 @@ def build_settings_procedure(
 
     procedure.set_image_types("*")
 
-    procedure.set_menu_label("GimpPresence: Settings…")
+    procedure.set_menu_label("GimpPresence: Open Settings")
     procedure.set_documentation(
         "Configure GimpPresence",
         "Open the GimpPresence settings dialog. Changes are applied to the "

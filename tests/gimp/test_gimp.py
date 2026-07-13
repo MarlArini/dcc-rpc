@@ -33,7 +33,7 @@ from gimp_presence import (
     GPContext, GPSettings, GP_PREFS, GP_SESSION, GP_DETAILS, GP_DISPLAY_TYPES,
     _gp_get_active_image, _gp_get_enum_name, _gp_match_title,
     _gp_platform_query_window,
-    gp_load_settings, gp_pin_image, gp_unpin_image, gp_toggle_rpc,
+    gp_load_settings, gp_pin_image, gp_unpin_image,
     gp_update_small_icon, gp_update_large_icon, gp_update_presence,
     gp_register_temp_procedures, gp_unregister_temp_procedures,
     gp_start_timer, gp_stop_timer, gp_tick, gp_quit_loop,
@@ -180,21 +180,21 @@ class TestEnumName:
 
 class TestGpMatchTitle:
     def test_match_extracts_bracketed_name(self, gimp):
-        img = gimp.make_image(name="[scene]")
-        result = _gp_match_title("scene", [img])
+        img = gimp.make_image(name="scene.xcf")
+        result = _gp_match_title("scene.xcf", [img])
         assert result is img
 
     def test_no_match_returns_none(self, gimp):
-        img1 = gimp.make_image(name="[scene]")
-        img2 = gimp.make_image(name="[other]")
+        img1 = gimp.make_image(name="scene.xcf")
+        img2 = gimp.make_image(name="[other] (imported)")
         result = _gp_match_title("missing", [img1, img2])
         assert result is None
 
     def test_continues_past_non_bracketed_names(self, gimp):
-        """A non-bracketed name should be skipped, not abort the loop."""
-        no_brackets = gimp.make_image(name="plain_name")
-        matching = gimp.make_image(name="[target]")
-        result = _gp_match_title("target", [no_brackets, matching])
+        """A non-matching name should be skipped, not abort the loop."""
+        non_matching = gimp.make_image(name="plain_name")
+        matching = gimp.make_image(name="target.xcf")
+        result = _gp_match_title("target.xcf", [non_matching, matching])
         assert result is matching
 
     def test_empty_image_list_returns_none(self):
@@ -574,7 +574,7 @@ class TestGPContext:
 
 
 # ---------------------------------------------------------------------------
-# gp_pin_image / gp_unpin_image / gp_toggle_rpc
+# gp_pin_image / gp_unpin_image
 # ---------------------------------------------------------------------------
 
 class TestPinToggle:
@@ -605,14 +605,6 @@ class TestPinToggle:
         proc = self._make_proc(gimp, "gimppresence-unpin-image")
         gp_unpin_image(proc, None, img, None, None, None)
         assert GP_SESSION.pinned_image is None
-
-    def test_toggle_rpc_flips_general_enable(self, gimp):
-        proc = self._make_proc(gimp, "gimppresence-toggle-rpc")
-        GP_PREFS.generalEnable = True
-        gp_toggle_rpc(proc, None, gimp.make_image(), None, None, None)
-        assert GP_PREFS.generalEnable is False
-        gp_toggle_rpc(proc, None, gimp.make_image(), None, None, None)
-        assert GP_PREFS.generalEnable is True
 
 
 # ---------------------------------------------------------------------------
@@ -769,7 +761,7 @@ class TestTimer:
         """generalUpdate=0 should still produce at least 10000ms interval."""
         GP_PREFS.generalUpdate = 0
         gp_start_timer()
-        assert GLib._last_scheduled_interval() == 10000
+        assert GLib._last_scheduled_interval() == 12000
 
     def test_stop_timer_clears_id(self):
         gp_start_timer()
@@ -847,7 +839,7 @@ class TestTempProcedureRegistration:
     def test_unregister_clears_all_when_registered(self, gimp):
         plugin = gimp.PlugIn()
         gp_register_temp_procedures(plugin)
-        assert len(gimp.get_state().temp_procedures) >= 4
+        assert len(gimp.get_state().temp_procedures) >= 3
         gp_unregister_temp_procedures(plugin)
         assert len(gimp.get_state().temp_procedures) == 0
         assert GP_SESSION.temp_procedures_registered is False
