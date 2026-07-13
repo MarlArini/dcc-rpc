@@ -1,7 +1,7 @@
 """
 C4DPresence is a Discord Rich Presence client plugin for Cinema 4D, based on
 https://github.com/abrasic/blendpresence. C4DPresence has been tested on Cinema
-4D 2026.2. For more info, see https://github.com/MarlArini/dcc-rpc.
+4D 2026.3. For more info, see https://github.com/MarlArini/dcc-rpc.
 """
 
 import atexit
@@ -88,6 +88,16 @@ _MG_EFFECTORS: frozenset[int] = frozenset(
         c4d.Omgtime, c4d.Omgvolume, c4d.Omgcoffee, c4d.Omgroup,
     ]
 )
+
+# All objects under "Create -> Mesh"
+_MESH_PRIMITIVES: frozenset[int] = frozenset(
+    [
+        c4d.Omgtext, c4d.Ocube, c4d.Ocylinder, c4d.Oplane, c4d.Odisc, c4d.Opolygon,
+        c4d.Osphere, c4d.Ocapsule, c4d.Ocone, c4d.Ofigure, c4d.Ofractal, c4d.Ooiltank,
+        c4d.Opyramid, c4d.Oplatonic, c4d.Otube, c4d.Otorus, c4d.Obezier
+    ]
+)
+
 # fmt: on
 
 # Possible responses to document.GetMode(), mapped to string names
@@ -264,12 +274,13 @@ class C4DPSettings(SharedSettings, RenderSettings):
         ("Camera count", "cam"),
         ("Material count", "mat"),
         ("Texture count", "tex"),
+        ("Color space info", "color"),
         ("Current frame", "frame"),
     ]
 
 
 class C4DPSession(SessionInfo):
-    render_res: Tuple[int, int] = (0,0)
+    render_res: Tuple[int, int] = (0, 0)
     render_engine: str = ""
     rendering_doc: str = ""
 
@@ -327,7 +338,7 @@ class C4DContext:
         return plural(count, "object")
 
     def get_mesh_count(self) -> str:
-        count = sum([1 for o in self.objects if o.GetType() == c4d.Opolygon])
+        count = sum([1 for o in self.objects if o.GetType() in _MESH_PRIMITIVES])
         return plural(count, "mesh", "es")
 
     def get_cam_count(self) -> str:
@@ -390,12 +401,16 @@ class C4DContext:
         return get_file_size_str(sz)
 
     def get_version_str(self) -> str:
-        ver = c4d.GetC4DVersion()
-        year = str(ver)[:4]
-        release = int(str(ver)[4:])
-        while release % 10 == 0 and release > 0:
-            release = release // 10
-        return f"{year}.{str(release)}"
+        ver_str = str(c4d.GetC4DVersion())
+        year = ver_str[:4]
+        major_release = ver_str[4]
+        minor_release = ver_str[5:]
+        while minor_release.startswith("0"):
+            minor_release = minor_release[1:]
+        if minor_release:
+            return f"{year}.{major_release}.{minor_release}"
+        else:
+            return f"{year}.{major_release}"
 
     def get_active_object(self) -> str | None:
         obj = self.document.GetActiveObject()
@@ -472,6 +487,7 @@ C4DP_DISPLAY_TYPES = {
     "cam": lambda ctx: ctx.get_cam_count(),
     "mat": lambda ctx: ctx.get_mat_count(),
     "tex": lambda ctx: ctx.get_tex_count(),
+    "color": lambda ctx: ctx.get_color_info(),
     "frame": lambda ctx: ctx.get_current_frame(),
 }
 
@@ -683,8 +699,8 @@ class C4DPPresenceMessage(c4d.plugins.MessageData):
                     C4DP_SESSION.start_time = time.time()
             # Poll render start
             if not C4DP_SESSION.is_rendering and (
-                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EDITORRENDERING) or \
-                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EXTERNALRENDERING)
+                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EDITORRENDERING)
+                or c4d.CheckIsRunning(c4d.CHECKISRUNNING_EXTERNALRENDERING)
             ):
                 # Is rendering
                 C4DP_SESSION.is_rendering = True
@@ -697,11 +713,13 @@ class C4DPPresenceMessage(c4d.plugins.MessageData):
                 C4DP_SESSION.render_res = (int(res_info[0]), int(res_info[1]))
                 # Get engine
                 e_id = render_info[c4d.RDATA_RENDERENGINE]
-                C4DP_SESSION.render_engine = _C4D_RENDER_ENGINES.get(e_id, "Unknown render engine")
+                C4DP_SESSION.render_engine = _C4D_RENDER_ENGINES.get(
+                    e_id, "Unknown render engine"
+                )
             # Poll render stop
             elif C4DP_SESSION.is_rendering and not (
-                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EDITORRENDERING) or \
-                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EXTERNALRENDERING)
+                c4d.CheckIsRunning(c4d.CHECKISRUNNING_EDITORRENDERING)
+                or c4d.CheckIsRunning(c4d.CHECKISRUNNING_EXTERNALRENDERING)
             ):
                 # No longer rendering
                 C4DP_SESSION.is_rendering = False

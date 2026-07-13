@@ -334,7 +334,8 @@ def test_get_active_object_returns_prefixed_name(c4d_mod, c4dp):
 
 @pytest.mark.parametrize("ver, expected", [
     (20262, "2026.2"),     # year + nonzero release
-    (202621, "2026.21"),   # multi-digit release
+    (202621, "2026.2.1"),   # multi-digit release
+    (2026301, "2026.3.1"),
     (20262000, "2026.2"),  # trailing zeros stripped
 ])
 def test_get_version_str(c4d_mod, c4dp, ver, expected):

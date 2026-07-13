@@ -64,6 +64,26 @@ Olight = 5102
 Osky = 5105
 Oenvironment = 5106
 
+
+# Mesh type IDs
+Omgtext = 1019268
+Ocube = 5159
+Ocylinder = 5170
+Oplane = 5168
+Odisc = 5164
+Osphere = 5160
+Ocapsule = 5171
+Ocone = 5162
+Ofigure = 5166
+Ofractal = 5169
+Ooiltank = 5172
+Opyramid = 5167
+Oplatonic = 5161
+Otube = 5165
+Otorus = 5163
+Obezier = 5120
+
+
 # MoGraph generator/deformer types.
 Omgcloner = 1018544
 Omgmatrix = 1018545
