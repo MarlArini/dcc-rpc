@@ -31,10 +31,11 @@ class MPContext:
         except RuntimeError:
             return ""
 
-    def get_project_name(self) -> str:
-        return cast(str, cmds.workspace(query=True, shortName=True))
+    def get_project_name(self) -> str | None:
+        pname = cast(str, cmds.workspace(query=True, shortName=True))
+        return pname if pname != "default" else None
 
-    def get_file_name(self, ext: bool = False) -> str:
+    def get_file_name(self, ext: bool = False) -> str | None:
         """
         Return the file name of the scene, if it is saved.
         `ext` determines whether to include the .mb extension
@@ -42,7 +43,7 @@ class MPContext:
         p = cast(str, cmds.file(query=True, sceneName=True))
         if p:
             return Path(p).name if ext else Path(p).stem
-        return ""
+        return None
 
     def get_current_scene(self) -> str:
         project_name = self.get_project_name()

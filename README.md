@@ -33,5 +33,7 @@ Marvelous Designer also lacks threading support.
 Clip Studio Paint does not have a plugin system at all, at least within the United States. There is a C++ SDK for the Japanese version of the program; if this ever expands internationally, I'll consider writing a plugin.
 
 ## Bug Reports
-Before opening an issue please try the latest release version of the plugin; it may have already been fixed.
+I've tried to test the plugins with both unit testing and in-app testing. However, many of these applications are very complex, especially the more general-purpose apps like Maya, and there are likely to be some bugs. I will do my best to fix issues as they are reported.
+
+Before opening an issue please try the latest release version of the plugin and check the issues page; it may have already been fixed.
 If you're still having a problem, please note the application (name and version) in the issue. Note that if the application version is so old it is using Python 2 instead of Python 3, I probably will not be rewriting the code to be Python 2 compliant.
