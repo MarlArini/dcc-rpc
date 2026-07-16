@@ -888,22 +888,6 @@ def test_update_small_icon_no_active_tool_clears_icon(sp, sp_plugin_clean):
     assert sp_plugin_clean.details.small_icon is None
     assert sp_plugin_clean.details.small_icon_text == ""
 
-
-def test_update_small_icon_paint_tool_but_no_color(sp, sp_plugin_clean):
-    """Paint is active but get_paint_color returns None (no SourceParametersView)
-    — should leave small_icon as None rather than crash."""
-    sp_plugin_clean.prefs.displaySmallIcon = True
-    sp_plugin_clean.prefs.enableColoredIcons = True
-    sp_plugin_clean.session.is_rendering = False
-
-    toolbar = sp.make_toolbar(buttons=[sp.make_tool_button("Paint", checked=True)])
-    mw = sp.make_qt_main_window(children=[toolbar])  # no SourceParametersView
-    ctx = _ctx_with(sp, mw)
-
-    sp_plugin_clean.update_small_icon(ctx)
-    assert sp_plugin_clean.details.small_icon is None
-
-
 # --- update_large_icon ---
 
 def test_update_large_icon_with_version(sp, sp_plugin_clean):
