@@ -17,12 +17,7 @@ MP_CALLBACKS: Set[Tuple[str, int]] = set()
 
 
 def mp_observe_plugin_load(string_array, clientData):  # pylint: disable=unused-argument,invalid-name
-    """Refresh the extension type cache when any plug-in loads.
-
-    The cache is rebuilt unconditionally rather than filtered by plug-in
-    name because cmds.listNodeTypes already returns the union of all
-    loaded engines' types — there's nothing to lose by re-querying it,
-    and we don't need a hard-coded list of "known" render engines."""
+    """Refresh the extension type cache when any plug-in loads."""
     extension_types.rebuild()
 
 

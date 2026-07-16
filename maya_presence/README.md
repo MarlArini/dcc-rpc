@@ -1,8 +1,7 @@
 ## Installation Instructions
-- Download and extract the MayaPresence ZIP from releases, or clone the repository and copy the maya_presence folder; place the maya_presence folder somewhere permanent. Assume the full path to the folder location looks something like C:/.../maya_presence
-- Add that location to your Maya.env file under C:/Users/YourName/Documents/maya/YEAR/Maya.env (create it if it does not exist) by adding a new line "MAYA_MODULE_PATH=;C:/.../maya_presence"
+- Download and extract the MayaPresence ZIP from releases or clone the repository, run the build script, and copy the maya_presence folder from dist/. Place the contents (maya_presence.mod and the maya_presence folder) somewhere in your MAYA_MODULE_PATH (see https://help.autodesk.com/view/MAYAUL/2027/ENU/?guid=GUID-228CCA33-4AFE-4380-8C3D-18D23F7EAC72); on Windows the best default location is likely Documents/maya/modules. If the modules folder does not exist, you can create it. Make sure the maya_presence.mod file is at the top level in this location; e.g., if you choose Documents/maya/modules, then Documents/maya/modules should contain maya_presence.mod and maya_presence/, and not a folder which has the .mod and maya_presence/ folders within it, otherwise the plugin will not be detected by Maya.
 - Restart Maya if it was already running
-- Open Maya and go to Windows -> Settings/Preferences -> Plug-In Manager. There should be a new tab "C:/.../maya_presence"; check the "Loaded" and "Auto load" boxes to enable the plugin in the current session and on startup.
+- Open Maya and go to Windows -> Settings/Preferences -> Plug-In Manager. There should be a new tab "...Documents/maya/modules/maya_presence"; check the "Loaded" and "Auto load" boxes to enable the plugin in the current session and on startup. (You may need to restart Maya for the settings menu to work.)
 
 ## Accessing Settings
 Under "Windows" in the top toolbar, a new option will be added at the bottom of the menu: "Maya Presence Settings...". Click to open the GUI settings menu.

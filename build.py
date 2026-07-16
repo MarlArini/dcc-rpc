@@ -93,15 +93,18 @@ def _bundle_maya(pypresence_src: Path) -> None:
     """Produces:
         dist/maya_presence/                  (drop into MAYA_MODULE_PATH)
           maya_presence.mod
-          plug-ins/
-            maya_presence.py
-            common/
-            pypresence/
+          maya_presence/
+            README.md
+            plug-ins/
+              maya_presence.py
+              common/
+              pypresence/
     """
     src = REPO / "maya_presence"
     dst = DIST / "maya_presence"
-    shutil.copytree(src, dst, ignore=IGNORE)
-    _drop_runtime(dst / "plug-ins", pypresence_src)
+    shutil.copytree(src, dst / "maya_presence", ignore=IGNORE)
+    shutil.move(dst / "maya_presence" / "maya_presence.mod", dst / "maya_presence.mod")
+    _drop_runtime(dst / "maya_presence" / "plug-ins", pypresence_src)
     print(f"[build] maya_presence/  (Maya module: {dst.name})")
 
 

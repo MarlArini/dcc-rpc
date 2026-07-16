@@ -20,9 +20,9 @@ class MPContext:
             card = cmds.openGLExtension(renderer=True) or ""
             if card:
                 if "NVIDIA GeForce " in card:
-                    card = card.replace("NVIDIA GeForce", "")
+                    card = card.replace("NVIDIA GeForce ", "")
                 if "Radeon " in card:
-                    card = card.replace("Radeon", "")
+                    card = card.replace("Radeon ", "")
                 slash_loc = card.find("/")
                 if slash_loc != -1:
                     return card[: card.find("/")]
@@ -150,6 +150,7 @@ class MPContext:
             "renderman": "RenderMan",
             "renderManRIS": "RenderMan",
             "vray": "V-Ray",
+            "OctaneRender": "Octane",
             "mayaSoftware": "Maya Software",
             "mayaHardware2": "Maya Hardware 2.0",
         }

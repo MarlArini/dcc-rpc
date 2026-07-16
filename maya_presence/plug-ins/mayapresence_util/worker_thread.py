@@ -2,7 +2,6 @@
 import copy
 import threading
 import time
-from typing import Optional
 
 from pypresence.presence import Presence
 from pypresence import exceptions as pypresence_exceptions
@@ -23,7 +22,7 @@ _RPC_LOST_EXC = (
 class _MPRPCWorker(threading.Thread):
     """Daemon thread that owns the Presence client.
     During sequence renders and certain other events like file dialogs,
-    the Maya application is not considered idle, and so om.MTimerMessage
+    the Maya application is not considered idle, so om.MTimerMessage
     will never fire. Qt timers also do not tick during a sequence render.
     The solution is to have a background thread that pushes RPC updates,
     and to update presence details manually from the MEL callbacks for
@@ -103,9 +102,9 @@ class _MPRPCWorker(threading.Thread):
             self._client.clear()
         except _RPC_LOST_EXC as e:
             self._connected = False
-            mp_print(f"worker clear failed: {e}")
+            mp_print(f"Worker clear failed: {e}")
         except Exception as e:  # noqa: BLE001
-            mp_print(f"worker clear error (non-fatal): {e}")
+            mp_print(f"Worker clear error (non-fatal): {e}")
 
     def run(self) -> None:
         while not self._stopped:

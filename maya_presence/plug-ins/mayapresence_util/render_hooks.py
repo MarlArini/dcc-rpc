@@ -21,9 +21,7 @@ def mp_wrap_mel(
     matters because Maya's plug-in loader doesn't register maya_presence.py
     in sys.modules, so `import maya_presence` from MEL creates a fresh
     duplicate module whose namespace wouldn't have these functions unless
-    we explicitly re-exported them. Submodules under mayapresence_util/
-    DO go through normal import machinery and ARE cached, so importing
-    them by their dotted name lands on the canonical instance.
+    we explicitly re-exported them.
     """
     mp = "_mp"
     start = f"{MP_HOOK_START} " if wrap else ""  # fmt: skip

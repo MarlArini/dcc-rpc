@@ -18,7 +18,8 @@ MP_TIMER_CALLBACK_ID = None
 
 def mp_on_timer(elapsed_time, last_time, client_data):  # pylint: disable=unused-argument
     # Redshift lazy-installs its options node when the user first opens
-    # the Redshift render settings panel.
+    # the Redshift render settings panel, so check each tick if there are
+    # missing render handlers
     if not mp_check_render_handlers_installed():
         mp_install_render_handlers()
 
