@@ -29,3 +29,5 @@ If you are in the Baking or IRay menus, the details field will override with the
 
 ## Troubleshooting Problems
 If the plugin is not working, check the Substance Painter log for error messages before opening an issue. These will help to determine the cause of the error.
+
+Note that seeing "Unable to get application context" messages before opening a project is normal; this message appears when it is not possible for the plugin to get information on the active project.

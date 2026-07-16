@@ -414,17 +414,19 @@ class SPContext:
 
     def get_brush_material(self) -> str | None:
         """Query the UI for brush material by looking for the materialModeParams widget
-        and reading its dropzone_text"""
+        and reading its dropzone_text. Checks if a material is selected by seeing if the
+        clear material button exists."""
         mat_params = self._find_named(
             self.main_window, QtW.QWidget, "materialModeParams"
         )
         if mat_params is None:
             return None
         mat_label = self._find_named(mat_params, QtW.QLabel, "dropzone_text")
-        if mat_label is None:
+        button_exists = self._find_named(mat_params, QtW.QToolButton, "clear")
+        if mat_label is None or not button_exists:
             return None
         label = mat_label.text()
-        return label if label != "No resource selected" else None
+        return label if label else None
 
     def get_brush_alpha(self) -> str | None:
         """Query the UI for brush alpha by looking for the MaskParametersView widget
@@ -541,6 +543,10 @@ class SPPlugin(RPCBasePlugin):
                 prefix, subset = "paint", _SP_BRUSH_TOOL_CONFIG["paint"]
             else:
                 prefix, subset = "pphys", _SP_BRUSH_TOOL_CONFIG["pphys"]
+            if (mat := ctx.get_brush_material()) is not None:
+                self.details.small_icon = tool_objname.lower()
+                self.details.small_icon_text = f"Painting in {mat} (material)"
+                return
             rgb = ctx.get_paint_color()
             if rgb is not None:
                 match = find_closest(
@@ -553,10 +559,6 @@ class SPPlugin(RPCBasePlugin):
                 self.details.small_icon_text = (
                     f"Painting in {match.display_name} ({match.user_hex})"
                 )
-                return
-            elif (mat := ctx.get_brush_material()) is not None:
-                self.details.small_icon = tool_objname.lower()
-                self.details.small_icon_text = f"Painting in {mat}"
                 return
         # No colored icons, or not Paint/Physical Paint tools
         self.details.small_icon = tool_objname.lower()
