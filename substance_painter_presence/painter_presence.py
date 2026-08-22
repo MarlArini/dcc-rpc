@@ -32,15 +32,6 @@ from colors import (
 _SP_PAINT_NAME = "Paint"
 _SP_PHYSPAINT_NAME = "Paint_Physics"
 
-# Map Painter tool -> (icon-key prefix, palette subset for closest-color icon
-# lookup). The subset partitions the 250-entry palette into 125 evens (Paint)
-# + 125 odds (Physical paint) so each brush gets a
-# distinct icon set without exceeding Discord's 300 assets-per-app limit.
-_SP_BRUSH_TOOL_CONFIG = {
-    "paint": SUBSTANCEPAINTER_PAINT_SUBSET,
-    "pphys": SUBSTANCEPAINTER_PHYSPAINT_SUBSET,
-}
-
 # Store plugin preferences in this directory
 _SP_PREF_LOCATION = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,7 +43,6 @@ _SP_PREF_LOCATION = os.path.dirname(os.path.abspath(__file__))
 @dataclass
 class SPSettings(ColoredIconSettings, SharedSettings, JSONSharedSettings):
     # pylint: disable=invalid-name
-    _PREFIX: ClassVar[str] = "painterPresence_"
     INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
         ("Project name", "project"),
         ("Project mesh count", "num_meshes"),
@@ -226,8 +216,8 @@ class SPContext:
         return f"Texture set: {tn} ({tmr})"
 
     def _recurse_count_nodes(self, root_node) -> int:
-        """Count the number of nodes descending from this one,
-        including the root node itself"""
+        """Count the number of non-group nodes descending from this one,
+        including the root node itself (if the root is not a GroupLayerNode)"""
         count = 0
         if isinstance(root_node, sp.layerstack.GroupLayerNode):
             for child_node in root_node.sub_layers():
@@ -305,6 +295,8 @@ class SPContext:
         if self.stack is None:
             return None
         selected_nodes = sp.layerstack.get_selected_nodes(self.stack)
+        # Note: get_blending_mode on a node requires specifying a channel if the
+        # node is not in a mask stack
         if selected_nodes and selected_nodes[0].is_in_mask_stack():
             return selected_nodes[0].get_blending_mode(None).name
         return None
@@ -461,7 +453,6 @@ class SPPlugin(RPCBasePlugin):
         "layer_info": lambda ctx: ctx.get_active_layer_info(),
         "brush_alpha": lambda ctx: ctx.get_brush_alpha(),
     }
-    display_cycle: ClassVar[List[str]] = list(display_types.keys())
 
     def __init__(self):
         super().__init__(
@@ -472,23 +463,30 @@ class SPPlugin(RPCBasePlugin):
             error=sp.logging.error,
             path=_SP_PREF_LOCATION,
         )
+        self._event_connections = []
 
     def start(self):
         self.session.connected = self._connect_rpc()
         self.session.start_time = time.time()
-        sp.event.DISPATCHER.connect(sp.event.ProjectOpened, self._on_file_open)
-        sp.event.DISPATCHER.connect(sp.event.ProjectCreated, self._on_file_open)
-        sp.event.DISPATCHER.connect(
-            sp.event.BakingProcessAboutToStart, self._on_bake_start
-        )
-        sp.event.DISPATCHER.connect(
-            sp.event.BakingProcessProgress, self._on_bake_update
-        )
-        sp.event.DISPATCHER.connect(sp.event.BakingProcessEnded, self._on_bake_end)
+        self._event_connections = [
+            (sp.event.ProjectOpened, self._on_file_open),
+            (sp.event.ProjectCreated, self._on_file_open),
+            (sp.event.BakingProcessAboutToStart, self._on_bake_start),
+            (sp.event.BakingProcessProgress, self._on_bake_update),
+            (sp.event.BakingProcessEnded, self._on_bake_end),
+        ]
+        for event, handler in self._event_connections:
+            sp.event.DISPATCHER.connect(event, handler)
         self.timer.start()
 
     def close(self):
         self.timer.stop()
+        for event, handler in self._event_connections:
+            try:
+                sp.event.DISPATCHER.disconnect(event, handler)
+            except Exception:  # noqa: BLE001
+                pass
+        self._event_connections = []
         try:
             self.rpc_client.clear()
             self.rpc_client.close()
@@ -540,9 +538,9 @@ class SPPlugin(RPCBasePlugin):
         # Paint and Physical Paint tools
         if tool_objname in [_SP_PAINT_NAME, _SP_PHYSPAINT_NAME]:
             if tool_objname == _SP_PAINT_NAME:
-                prefix, subset = "paint", _SP_BRUSH_TOOL_CONFIG["paint"]
+                prefix, subset = "paint", SUBSTANCEPAINTER_PAINT_SUBSET
             else:
-                prefix, subset = "pphys", _SP_BRUSH_TOOL_CONFIG["pphys"]
+                prefix, subset = "pphys", SUBSTANCEPAINTER_PHYSPAINT_SUBSET
             if (mat := ctx.get_brush_material()) is not None:
                 self.details.small_icon = tool_objname.lower()
                 self.details.small_icon_text = f"Painting in {mat} (material)"
@@ -588,7 +586,11 @@ class SPPlugin(RPCBasePlugin):
         # Baking / rendering UI panes: the state slot describes what phase of
         # work the user is in ("Adjusting baking settings", "Previewing in
         # IRay"). During an actual bake we display bake progress.
-        if self.prefs.enableState and self.prefs.bakingDetails and self.session.is_rendering:
+        if (
+            self.prefs.enableState
+            and self.prefs.bakingDetails
+            and self.session.is_rendering
+        ):
             self.details.state_text = (
                 f"Baking: {self.session.rendered_frames}% complete"
             )

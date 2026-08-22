@@ -15,7 +15,6 @@ Tested:
   - GPSession behavior
   - _gp_match_title / _gp_get_active_image cascade (pinned, single,
     multi+title-match, multi+fallback)
-  - _gp_get_enum_name
   - GPContext: every value-returning method, including alternate paths
   - gp_pin_image / gp_unpin_image / gp_toggle_rpc
   - gp_update_small_icon / gp_update_large_icon / gp_update_presence
@@ -31,7 +30,7 @@ import pytest
 import gimp_presence as gp
 from gimp_presence import (
     GPContext, GPSettings, GP_PREFS, GP_SESSION, GP_DETAILS, GP_DISPLAY_TYPES,
-    _gp_get_active_image, _gp_get_enum_name, _gp_match_title,
+    _gp_get_active_image, _gp_match_title,
     _gp_platform_query_window,
     gp_load_settings, gp_pin_image, gp_unpin_image,
     gp_update_small_icon, gp_update_large_icon, gp_update_presence,
@@ -51,10 +50,16 @@ from gi.repository import GLib
 
 @pytest.fixture(autouse=True)
 def _reset_module_state():
-    """Reset every piece of module-level state the tests in this file touch."""
+    """Reset every piece of module-level state the tests in this file touch.
+
+    `cleared` is reset going *in* as well as out: gp_update_presence only
+    clears on the transition into the disabled state, so a test that leaves it
+    set would silently suppress the clear in the next test."""
     snap_timer = gp._GP_TIMER_ID
     snap_docs_open = set(gp.GP_DOCS_OPEN)
     snap_connected = GP_SESSION.connected
+    snap_cleared = GP_SESSION.cleared
+    GP_SESSION.cleared = False
     snap_prefs = {f.name: getattr(GP_PREFS, f.name)
                   for f in GPSettings.__dataclass_fields__.values()}
     snap_details = (
@@ -67,6 +72,7 @@ def _reset_module_state():
     gp.GP_DOCS_OPEN.clear()
     gp.GP_DOCS_OPEN.update(snap_docs_open)
     GP_SESSION.connected = snap_connected
+    GP_SESSION.cleared = snap_cleared
     for name, value in snap_prefs.items():
         object.__setattr__(GP_PREFS, name, value)
     (GP_DETAILS.small_icon, GP_DETAILS.small_icon_text,
@@ -160,18 +166,6 @@ class TestGpLoadSettings:
         # iterating fields(GPSettings) and looking up keys in data).
         assert GP_PREFS.generalUpdate == 30
         assert not hasattr(GP_PREFS, "completelyUnknown")
-
-
-# ---------------------------------------------------------------------------
-# _gp_get_enum_name
-# ---------------------------------------------------------------------------
-
-class TestEnumName:
-    def test_returns_enum_member_name(self, gimp):
-        assert _gp_get_enum_name(gimp.LayerMode.Normal) == "Normal"
-        assert _gp_get_enum_name(gimp.LayerMode.Multiply) == "Multiply"
-        assert _gp_get_enum_name(gimp.ImageBaseType.RGB) == "RGB"
-        assert _gp_get_enum_name(gimp.ImageBaseType.INDEXED) == "INDEXED"
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +665,20 @@ class TestUpdatePresence:
         assert len(calls) == 1
         # Connection stays open — clear() doesn't change session state.
         assert GP_SESSION.connected is True
+
+    def test_disabled_pref_clears_once_not_every_tick(self, gimp, monkeypatch):
+        """The GLib timer keeps firing every generalUpdate seconds while
+        disabled; clearing an already-cleared presence each time is pointless
+        traffic."""
+        GP_PREFS.generalEnable = False
+        GP_SESSION.connected = True
+        calls: list[int] = []
+        monkeypatch.setattr(gp.GP_RPC_CLIENT, "clear", lambda: calls.append(1))
+        gp_update_presence()
+        gp_update_presence()
+        gp_update_presence()
+        assert len(calls) == 1
+        assert GP_SESSION.cleared is True
 
     def test_disabled_pref_clear_failure_marks_disconnected(self, gimp, monkeypatch):
         """If clear() raises (socket actually dropped), mark disconnected so

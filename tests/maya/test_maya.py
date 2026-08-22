@@ -37,7 +37,7 @@ def test_get_project_name(cmds):
 def test_get_file_name_unsaved(cmds):
     cmds.set_state(scene_name="")
     ctx = MPContext.capture()
-    assert ctx.get_file_name() == ""
+    assert ctx.get_file_name() is None
 
 
 def test_get_file_name_saved_no_ext(cmds):
@@ -1200,7 +1200,11 @@ class _FakeWorker:
     """Minimal stand-in for _MPRPCWorker that records publishes."""
 
     def __init__(self):
-        self.publishes: List[Tuple[Any, Any]] = []
+        # RPCUpdateDetails snapshots, one per publish() call. (List/Tuple/Any
+        # were never imported here — `from __future__ import annotations` kept
+        # the undefined names from raising, but they were undefined all the
+        # same. The tuple shape was also stale: publish() takes details only.)
+        self.publishes: list[object] = []
         self.last_published = None
         self.last_publish_enable = None
         self.started = False

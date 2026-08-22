@@ -24,7 +24,7 @@ from common import (
     JSONSharedSettings,
     RPCBasePlugin,
     force_clear_on_exit,
-    plural as sp_plural,
+    plural as sd_plural,
 )
 
 ############
@@ -33,9 +33,8 @@ from common import (
 
 
 @dataclass
-class SPSettings(SharedSettings, JSONSharedSettings):
+class SDSettings(SharedSettings, JSONSharedSettings):
     # pylint: disable=invalid-name
-    _PREFIX: ClassVar[str] = "designerPresence_"
     INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
         ("Package name", "package"),
         ("Graph name", "graph"),
@@ -63,22 +62,22 @@ class SPSettings(SharedSettings, JSONSharedSettings):
 
 
 @dataclass
-class SPContext:
+class SDContext:
     uimgr: sd.api.qtforpythonuimgrwrapper.QtForPythonUIMgrWrapper
     graph: sd.api.SDGraph
     package: sd.api.SDPackage
 
     @classmethod
-    def capture(cls) -> "SPContext | None":
-        if SP_PLUGIN.uimgr is None:
+    def capture(cls) -> "SDContext | None":
+        if SD_PLUGIN.uimgr is None:
             return None
-        graph = SP_PLUGIN.uimgr.getCurrentGraph()
+        graph = SD_PLUGIN.uimgr.getCurrentGraph()
         if graph is None:
             return None
         package = graph.getPackage()
         if package is None:
             return None
-        return cls(uimgr=SP_PLUGIN.uimgr, graph=graph, package=package)
+        return cls(uimgr=SD_PLUGIN.uimgr, graph=graph, package=package)
 
     def package_name(self) -> str:
         path = self.package.getFilePath()
@@ -89,7 +88,7 @@ class SPContext:
         if v is None:
             return "Unsaved graph"
         name = cast(sd.api.sdvaluestring.SDValueString, v).get()
-        if SP_PLUGIN.prefs.replaceUnderscores:
+        if SD_PLUGIN.prefs.replaceUnderscores:
             return f"Graph: {name.replace('_', ' ')}"
         else:
             return f"Graph: {name}"
@@ -111,11 +110,11 @@ class SPContext:
 
     def num_nodes(self) -> str:
         count = self.graph.getNodes().getSize()
-        return sp_plural(count, "node")
+        return sd_plural(count, "node")
 
     def num_output_nodes(self) -> str:
         count = self.graph.getOutputNodes().getSize()
-        return sp_plural(count, "output node")
+        return sd_plural(count, "output node")
 
     def parent_size(self) -> Tuple[int, int] | None:
         if isinstance(self.graph, sd.api.sbs.sdsbscompgraph.SDSBSCompGraph):
@@ -132,8 +131,8 @@ class SPContext:
         if output_size is None:
             return None
         output_size = cast(sd.api.sdbasetypes.int2, output_size).get()
-        w = int(parent_size[0] * pow(2, output_size.x))
-        h = int(parent_size[1] * pow(2, output_size.y))
+        w = int(parent_size[0] * 2**output_size.x)
+        h = int(parent_size[1] * 2**output_size.y)
         return f"Export resolution: {w}x{h}"
 
     def material_model(self) -> str | None:
@@ -152,10 +151,10 @@ class SPContext:
             for r in resources
             if r.getClassName() not in ("SDSBSCompGraph", "SDResourceFolder")
         )
-        return sp_plural(count, "resource")
+        return sd_plural(count, "resource")
 
     def color_space(self) -> str | None:
-        color_engine = SP_PLUGIN.app.getColorManagementEngine()
+        color_engine = SD_PLUGIN.app.getColorManagementEngine()
         if color_engine is None:
             return None
         return f"Color space: {color_engine.getWorkingColorSpaceName()}"
@@ -166,7 +165,7 @@ class SPContext:
 ###########
 
 
-class SPPlugin(RPCBasePlugin):
+class SDPlugin(RPCBasePlugin):
     # fmt: off
     atomic_nodes: ClassVar[frozenset] = frozenset(
         ["bitmap", "blend", "blur", "channels_shuffle", "curve",
@@ -188,7 +187,6 @@ class SPPlugin(RPCBasePlugin):
         "resource_count": lambda ctx: ctx.resource_count(),
         "color_space": lambda ctx: ctx.color_space(),
     }
-    display_cycle: ClassVar[List[str]] = list(display_types.keys())
 
     def __init__(self):
         self.ctx = sd.getContext()
@@ -202,7 +200,7 @@ class SPPlugin(RPCBasePlugin):
         super().__init__(
             app_id="1503302572822499439",
             app_name="designer",
-            prefs_class=SPSettings,
+            prefs_class=SDSettings,
             warn=self.logger.warning,
             error=self.logger.error,
             path=self.app.getPluginMgr().getUserPluginsDir(),
@@ -227,13 +225,13 @@ class SPPlugin(RPCBasePlugin):
             self.logger.exception("[DesignerPresence] failed to clear and close client")
 
     def _capture(self):
-        return SPContext.capture()
+        return SDContext.capture()
 
     def on_file_open(self, *args):  # pylint: disable=unused-argument
         if self.prefs.resetTimer:
             self.session.start_time = time.time()
 
-    def update_small_icon(self, ctx: SPContext):
+    def update_small_icon(self, ctx: SDContext):
         self.details.small_icon = None
         self.details.small_icon_text = ""
         if self.prefs.displaySmallIcon:
@@ -255,7 +253,7 @@ class SPPlugin(RPCBasePlugin):
             self.details.large_icon_text = "Adobe Substance 3D Designer"
 
 
-SP_PLUGIN = SPPlugin()
+SD_PLUGIN = SDPlugin()
 
 
 #####################
@@ -264,8 +262,8 @@ SP_PLUGIN = SPPlugin()
 
 _MENU_OBJNAME = "designerpresence.discordmenu"
 
-def sp_close_settings_menu():
-    if (window := SP_PLUGIN.settings_window) is not None:
+def sd_close_settings_menu():
+    if (window := SD_PLUGIN.settings_window) is not None:
         try:
             window.close()
             window.deleteLater()
@@ -273,15 +271,15 @@ def sp_close_settings_menu():
             pass
 
 
-def sp_open_settings_menu():
-    if (uimgr := SP_PLUGIN.uimgr) is None or (
+def sd_open_settings_menu():
+    if (uimgr := SD_PLUGIN.uimgr) is None or (
         main_window := uimgr.getMainWindow()
     ) is None:
         return
-    SP_PLUGIN.show_qt_window("Designer", main_window)
+    SD_PLUGIN.show_qt_window("Designer", main_window)
 
 
-def _sp_find_discord_action(menu_bar):
+def _sd_find_discord_action(menu_bar):
     try:
         actions = menu_bar.actions()
     except RuntimeError:
@@ -295,10 +293,10 @@ def _sp_find_discord_action(menu_bar):
     return None
 
 
-def _sp_remove_discord_menu(menu_bar):
+def _sd_remove_discord_menu(menu_bar):
     """Remove the Discord submenu from `menu_bar` if present. Safe to call
     when no such submenu exists; safe under stale-wrapper conditions."""
-    action = _sp_find_discord_action(menu_bar)
+    action = _sd_find_discord_action(menu_bar)
     if action is None:
         return
     try:
@@ -316,38 +314,39 @@ def _sp_remove_discord_menu(menu_bar):
             pass
 
 
-def sp_install_settings_menu():
-    if (uimgr := SP_PLUGIN.uimgr) is None or (
+def sd_install_settings_menu():
+    if (uimgr := SD_PLUGIN.uimgr) is None or (
         main_window := uimgr.getMainWindow()
     ) is None:
-        SP_PLUGIN.logger.error("[DesignerPresence] Unable to install settings menu.")
+        SD_PLUGIN.logger.error("[DesignerPresence] Unable to install settings menu.")
         return
     menu_bar = main_window.menuBar()
-    _sp_remove_discord_menu(menu_bar)
+    _sd_remove_discord_menu(menu_bar)
     plugin_menu = menu_bar.addMenu("Discord")
     plugin_menu.menuAction().setObjectName(_MENU_OBJNAME)
     settings_action = plugin_menu.addAction("Settings")
-    settings_action.triggered.connect(sp_open_settings_menu)
-    SP_PLUGIN.menubar_item = plugin_menu
+    settings_action.triggered.connect(sd_open_settings_menu)
+    SD_PLUGIN.menubar_item = plugin_menu
 
 
-def sp_uninstall_settings_menu():
-    if (uimgr := SP_PLUGIN.uimgr) is None or (
+def sd_uninstall_settings_menu():
+    sd_close_settings_menu()
+    if (uimgr := SD_PLUGIN.uimgr) is None or (
         main_window := uimgr.getMainWindow()
     ) is None:
-        SP_PLUGIN.logger.error("[DesignerPresence] Unable to uninstall settings menu.")
+        SD_PLUGIN.logger.error("[DesignerPresence] Unable to uninstall settings menu.")
         return
     try:
         menu_bar = main_window.menuBar()
     except RuntimeError:
-        SP_PLUGIN.logger.warning(
+        SD_PLUGIN.logger.warning(
             "[DesignerPresence] Could not access menu bar during uninstall:",
             exc_info=True,
         )
-        SP_PLUGIN.menubar_item = None
+        SD_PLUGIN.menubar_item = None
         return
-    _sp_remove_discord_menu(menu_bar)
-    SP_PLUGIN.menubar_item = None
+    _sd_remove_discord_menu(menu_bar)
+    SD_PLUGIN.menubar_item = None
 
 
 ###################
@@ -356,13 +355,13 @@ def sp_uninstall_settings_menu():
 
 
 def initializeSDPlugin():  # pylint: disable=invalid-name
-    SP_PLUGIN.start()
-    sp_install_settings_menu()
+    SD_PLUGIN.start()
+    sd_install_settings_menu()
 
 
 def uninitializeSDPlugin():  # pylint: disable=invalid-name
-    sp_uninstall_settings_menu()
-    SP_PLUGIN.close()
+    sd_uninstall_settings_menu()
+    SD_PLUGIN.close()
 
 
-atexit.register(force_clear_on_exit, SP_PLUGIN.rpc_client)
+atexit.register(force_clear_on_exit, SD_PLUGIN.rpc_client)

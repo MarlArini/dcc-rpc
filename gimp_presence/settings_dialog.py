@@ -14,18 +14,19 @@ from dataclasses import fields, Field
 from pathlib import Path
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, get_type_hints
 
-import gi
+# pylint: disable=wrong-import-position, wrong-import-order, import-error, unused-import, line-too-long
+import gi   # pyright: ignore[reportMissingImports]
 
 gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gimp, GimpUi, GLib, GObject, Gtk
-
+from gi.repository import Gimp, GimpUi, GLib, GObject, Gtk   # pyright: ignore[reportMissingImports] #noqa: E402, F401
+# pylint: enable=import-error, unused-import, line-too-long
 
 SETTINGS_PROC_NAME = "gimppresence-open-settings"
 
 
-def _gp_warn(message: str):
+def gp_warn(message: str):
     message_handler = Gimp.message_get_handler()
     if message_handler != Gimp.MessageHandlerType.ERROR_CONSOLE:
         new_handler_success = Gimp.message_set_handler(
@@ -300,7 +301,7 @@ def _make_run_fn(
         GimpUi.init(plug_in_binary)
         dialog = GimpUi.ProcedureDialog.new(procedure, config, "GimpPresence Settings")
         if dialog is None:
-            _gp_warn("[GimpPresence] failed to create settings dialog.")
+            gp_warn("[GimpPresence] failed to create settings dialog.")
             return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, None)
         try:
             _fill_dialog(dialog, settings_class)
@@ -329,14 +330,14 @@ def _make_run_fn(
             try:
                 atomic_write_json(settings_json_path, new_values)
             except OSError as e:
-                _gp_warn(f"[GimpPresence] Failed to write new settings to JSON: {e}")
+                gp_warn(f"[GimpPresence] Failed to write new settings to JSON: {e}")
                 # Don't fail the dialog — in-memory state was already updated.
 
             if on_settings_changed is not None:
                 try:
                     on_settings_changed()
                 except Exception as e:  # noqa: BLE001
-                    _gp_warn(
+                    gp_warn(
                         (
                             "[GimpPresence] failed to interrupt RPC timer; "
                             f"new settings may take time to take effect: {e}"
@@ -345,7 +346,8 @@ def _make_run_fn(
 
             return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
         except Exception as e:
-            _gp_warn(f"[GimpPresence] error constructing dialog: {e}")
+            gp_warn(f"[GimpPresence] error constructing dialog: {e}")
+            return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, None)
         finally:
             dialog.destroy()
     return run

@@ -8,7 +8,6 @@ import atexit
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-import sys
 import threading
 import time
 from typing import Tuple, ClassVar, List, Dict, Any
@@ -39,11 +38,6 @@ from common import (
     DISCORD_SHORT_TERM_RATE_LIMIT,
 )
 
-# Bootstrap: ensure this plugin's directory is on sys.path so the sibling
-# common.py and pypresence/ resolve when loaded by the host application.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
 
 ###########
 # Globals #
@@ -51,32 +45,37 @@ if _HERE not in sys.path:
 
 NK_IS_COMMERCIAL = not (nuke.env.get("indie") or nuke.env.get("nc"))
 
+
 @dataclass
 class NKSettings(SharedSettings, JSONSharedSettings):
     # pylint: disable=invalid-name
     _PREFIX: ClassVar[str] = "nukePresence_"
-    INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = [
-        ("Memory usage", "memory_usage"),
-        ("Node count", "num_nodes"),
-        ("Active node (commercial)", "active_node"),
-        ("Read/write node count (commercial)", "io_nodes"),
-        ("Layer count", "num_layers"),
-        ("Frame info", "frame"),
-        ("Viewer info (commercial)", "viewer_info"),
-        ("Color management", "color_management"),
-        ("Comp name", "comp_name"),
-        ("Format", "format"),
-        ("Proxy info", "scaling"),
-    ] if NK_IS_COMMERCIAL else [
-        ("Memory usage", "memory_usage"),
-        ("Node count", "num_nodes"),
-        ("Layer count", "num_layers"),
-        ("Frame info", "frame"),
-        ("Color management", "color_management"),
-        ("Comp name", "comp_name"),
-        ("Format", "format"),
-        ("Proxy info", "scaling"),
-    ]
+    INFO_CHOICES: ClassVar[List[Tuple[str, str]]] = (
+        [
+            ("Memory usage", "memory_usage"),
+            ("Node count", "num_nodes"),
+            ("Active node (commercial)", "active_node"),
+            ("Read/write node count (commercial)", "io_nodes"),
+            ("Layer count", "num_layers"),
+            ("Frame info", "frame"),
+            ("Viewer info (commercial)", "viewer_info"),
+            ("Color management", "color_management"),
+            ("Comp name", "comp_name"),
+            ("Format", "format"),
+            ("Proxy info", "scaling"),
+        ]
+        if NK_IS_COMMERCIAL
+        else [
+            ("Memory usage", "memory_usage"),
+            ("Node count", "num_nodes"),
+            ("Layer count", "num_layers"),
+            ("Frame info", "frame"),
+            ("Color management", "color_management"),
+            ("Comp name", "comp_name"),
+            ("Format", "format"),
+            ("Proxy info", "scaling"),
+        ]
+    )
     _INITIAL_DEFAULTS: ClassVar[Dict[str, Any]] = {
         "detailsType": "comp_name",
         "stateType": "num_nodes",
@@ -97,7 +96,7 @@ class NKSettings(SharedSettings, JSONSharedSettings):
 
 # pylint: disable=line-too-long
 # fmt:off
-NK_ICONS = [
+NK_ICONS = frozenset([
     '2D', '2DMasked', '3D', 'Add', 'Add32', 'AddMix', 'AdjBBox', 'Anaglyph', 'AppendClip', 'Assert', 'Axis', 
     'Backdrop', 'Bezier', 'Bilateral', 'BlackOutside', 'Blend', 'Blur', 'BumpBoss', 'Camera', 'CameraShake', 
     'Card', 'ChannelMerge', 'CheckerBoard', 'Clamp', 'CMSTestPattern', 'Color', 'Color3D', 'ColorBars', 
@@ -119,7 +118,7 @@ NK_ICONS = [
     'StickyNote', 'STMap', 'Switch', 'TemporalMedian', 'Text', 'Time', 'TimeBlur', 'TimeDissolve', 'TimeEcho', 
     'TimeOffset', 'TimeWarp', 'Tracker', 'Transform', 'Truelight', 'TVIScale', 'Unpremult', 'VectorBlur', 
     'Vectorfield', 'Viewer', 'VolumeRays', 'Write', 'WriteGeo', 'ZBlur', 'ZMerge', 'ZSlice'
-]
+])
 
 # fmt:on
 # pylint: enable=line-too-long
@@ -185,22 +184,17 @@ class NKContext:
             return None
         read_nodes = nuke.allNodes("Read")
         write_nodes = nuke.allNodes("Write")
-        if read_nodes is not None and write_nodes is not None:
-            if read_nodes and write_nodes:
-                return (
-                    f"{nk_plural(len(read_nodes), 'read node')}; "
-                    f"{nk_plural(len(write_nodes), 'write node')}"
-                )
-            elif read_nodes:
-                return nk_plural(len(read_nodes), "read node")
-            elif write_nodes:
-                return nk_plural(len(write_nodes), "write node")
-        elif read_nodes is not None and read_nodes:
-            return nk_plural(len(read_nodes), "read node")
-        elif write_nodes is not None and write_nodes:
-            return nk_plural(len(write_nodes), "write node")
-        else:
+        # Either query can come back None rather than an empty list depending on
+        # the Nuke version, so test truthiness and only join the parts that have
+        # something in them — a blank part would leave a dangling "; ".
+        parts = []
+        if read_nodes:
+            parts.append(nk_plural(len(read_nodes), "read node"))
+        if write_nodes:
+            parts.append(nk_plural(len(write_nodes), "write node"))
+        if not parts:
             return None
+        return "; ".join(parts)
 
     def get_num_layers(self) -> str:
         return nk_plural(len(nuke.layers()), "layer")
@@ -273,6 +267,7 @@ class NKContext:
         fps = self.get_fps()
         return f"Frame {frame} ({fps}fps)"
 
+
 #######
 # RPC #
 #######
@@ -298,27 +293,30 @@ def nk_update_small_icon(ctx: NKContext):
 
 
 def nk_handle_active_node(ctx: NKContext) -> str | None:
+    """Called to get node information to display in details/state fields.
+    Returns None for non-commercial users or for cases where the field should be skipped
+    (the user has enabled small icons, the node has an icon, and the display fields are cycling
+    - i.e., the node is already being displayed as the small icon)"""
     node = ctx.get_active_node()
     if node is None:  # get_active_node returns None on non-commercial/indie
         return
     if (
         (  # User has set details or state to a fixed 'active node' display
-            not NK_PREFS.detailsCycle
-            and NK_PREFS.detailsType == "active_node"
-            or not NK_PREFS.stateCycle
-            and NK_PREFS.stateType == "active_node"
+            (
+                not NK_PREFS.detailsCycle and NK_PREFS.detailsType == "active_node"
+            )  # fixed node details
+            or (
+                not NK_PREFS.stateCycle and NK_PREFS.stateType == "active_node"
+            )  # fixed node state
         )
-        or (  # Icons disabled
+        or (  # User has disabled icons
             not NK_PREFS.displaySmallIcon
         )
         or (  # Node has no valid icon
-            node is not None and node[1] not in NK_ICONS
+            node[1] not in NK_ICONS
         )
     ):
-        if node is None:
-            return "No nodes selected"
-        else:
-            return f"{node[0]} ({node[1]})"
+        return f"{node[0]} ({node[1]})"
     else:  # Node has a small icon which will be displayed AND we're in a cycle: skip
         return None
 
@@ -339,14 +337,14 @@ if NK_IS_COMMERCIAL:
     }
 else:
     NK_DISPLAY_TYPES = {
-            "memory_usage": lambda ctx: ctx.get_memory_usage(),
-            "num_nodes": lambda ctx: ctx.get_num_nodes(),
-            "num_layers": lambda ctx: ctx.get_num_layers(),
-            "frame": lambda ctx: ctx.get_frame_info(),
-            "color_management": lambda ctx: ctx.get_color_management(),
-            "comp_name": lambda ctx: ctx.get_comp_name(),
-            "format": lambda ctx: ctx.get_format_str(),
-            "scaling": lambda ctx: ctx.get_scaling_info(),
+        "memory_usage": lambda ctx: ctx.get_memory_usage(),
+        "num_nodes": lambda ctx: ctx.get_num_nodes(),
+        "num_layers": lambda ctx: ctx.get_num_layers(),
+        "frame": lambda ctx: ctx.get_frame_info(),
+        "color_management": lambda ctx: ctx.get_color_management(),
+        "comp_name": lambda ctx: ctx.get_comp_name(),
+        "format": lambda ctx: ctx.get_format_str(),
+        "scaling": lambda ctx: ctx.get_scaling_info(),
     }
 
 
@@ -373,8 +371,6 @@ def nk_update_presence_details(ctx):
 def nk_update_presence():
     if NK_PREFS.generalEnable:
         ctx = NKContext.capture()
-        if ctx is None:
-            return
         if NK_PREFS.detailsCycle or NK_PREFS.stateCycle:
             advance_cycle(NK_SESSION, NK_DISPLAY_TYPES)
         nk_update_large_icon(ctx)
@@ -387,9 +383,12 @@ def nk_update_presence():
         push_rpc_update(
             NK_SESSION, NK_UPDATE_DETAILS, NK_PREFS, NK_RPC_CLIENT, "nuke", nuke.error
         )
-    elif NK_SESSION.connected:
+    elif NK_SESSION.connected and not NK_SESSION.cleared:
+        # Clear once on the transition to disabled, not on every tick.
+        # push_rpc_update flips `cleared` back off on the next successful push.
         try:
             NK_RPC_CLIENT.clear()
+            NK_SESSION.cleared = True
         except Exception as e:  # noqa: BLE001
             nuke.warning(f"[NukePresence] clear failed: {e}")
             NK_SESSION.connected = False
@@ -416,10 +415,6 @@ class NKBackgroundWorker:
     def start(self):
         self._thread.start()
 
-    def stop(self):
-        self._stop_event.set()
-        self._thread.join(timeout=5)
-
     def _run(self):
         while not self._stop_event.wait(NK_PREFS.generalUpdate):
             try:
@@ -435,16 +430,22 @@ class NKBackgroundWorker:
 #############
 
 
-def nk_install_render_callbacks():
+def nk_reset_timer(session: SessionInfo):
+    session.start_time = time.time()
+
+
+def nk_install_callbacks():
     nuke.addBeforeRender(on_render_start, args=(NK_SESSION,))
     nuke.addAfterFrameRender(on_frame_render_end, args=(NK_SESSION,))
     nuke.addAfterRender(on_render_end, args=(NK_SESSION,))
+    nuke.addOnScriptLoad(nk_reset_timer, args=(NK_SESSION,))
 
 
-def nk_uninstall_render_callbacks():
+def nk_uninstall_callbacks():
     nuke.removeBeforeRender(on_render_start, args=(NK_SESSION,))
     nuke.removeAfterFrameRender(on_frame_render_end, args=(NK_SESSION,))
     nuke.removeAfterRender(on_render_end, args=(NK_SESSION,))
+    nuke.removeOnScriptLoad(nk_reset_timer, args=(NK_SESSION,))
 
 
 #####################
@@ -465,11 +466,10 @@ def nk_open_settings():
         return
 
     nuke_main_window = QtW.QApplication.activeWindow()
-
-    NK_SETTINGS_WINDOW = NukeSettingsWindow(parent=nuke_main_window)
-
-    if NK_SETTINGS_WINDOW is None:
-        nuke.warning("[NukePresence] could not register settings menu")
+    try:
+        NK_SETTINGS_WINDOW = NukeSettingsWindow(parent=nuke_main_window)
+    except Exception as e:  # noqa: BLE001
+        nuke.warning(f"[NukePresence] could not create settings window: {e}")
         return
     NK_SETTINGS_WINDOW.show()
 
@@ -480,7 +480,7 @@ def nk_open_settings():
 
 
 class NKMenu:
-    def __init__(self, prefs, worker):
+    def __init__(self, prefs):
         menubar = nuke.menu("Nuke")
         discord_menu = menubar.addMenu("Discord")
         self.enable_item = discord_menu.addCommand(
@@ -491,7 +491,6 @@ class NKMenu:
         )
         discord_menu.addCommand("Settings", command=nk_open_settings)
         self.prefs = prefs
-        self.worker = worker
         if self.prefs.generalEnable and not NK_SESSION.connected:
             NK_SESSION.connected = connect_rpc(NK_RPC_CLIENT, "Nuke", nuke.warning)
         self._sync_menu_state()
@@ -520,7 +519,7 @@ NK_PREFS.setup_persistence(
     app_name="nuke",
     warn=nuke.warning,
 )
-NK_MENU = NKMenu(NK_PREFS, NK_WORKER)
+NK_MENU = NKMenu(NK_PREFS)
 NK_WORKER.start()
-nk_install_render_callbacks()
+nk_install_callbacks()
 atexit.register(force_clear_on_exit, NK_RPC_CLIENT)

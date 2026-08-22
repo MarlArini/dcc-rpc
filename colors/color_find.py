@@ -51,8 +51,8 @@ def _hex_to_unit_srgb(hex_str: str) -> Tuple[float, float, float]:
         int(h[4:6], 16) / 255.0,
     )
 
-def clamp(a, i, j):
-    return i if a < i else j if a > j else a
+def _clamp(v, low, high):
+    return low if v < low else high if v > high else v
 
 def _normalize_rgb(rgb:
         str |
@@ -65,7 +65,7 @@ def _normalize_rgb(rgb:
         r, g, b = float(rgb[0]), float(rgb[1]), float(rgb[2])
         if isinstance(rgb[0], int):
             r, g, b = r / 255.0, g / 255.0, b / 255.0
-    return clamp(r, 0, 1), clamp(g, 0, 1), clamp(b, 0, 1)
+    return _clamp(r, 0, 1), _clamp(g, 0, 1), _clamp(b, 0, 1)
 
 def srgb_to_oklab(rgb) -> Tuple[float, float, float]:
     """Convert sRGB input (hex string or 3-tuple) to OKLab.

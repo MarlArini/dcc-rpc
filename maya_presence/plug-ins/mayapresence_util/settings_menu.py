@@ -96,7 +96,7 @@ def mp_uninstall_settings_menu():
         )
     except RuntimeError:
         return
-    new_pmc = existing_pmc.replace(MP_MENU_PMC, "")
+    new_pmc = existing_pmc.replace(";;" + MP_MENU_PMC, "")
     if new_pmc != existing_pmc:
         try:
             cmds.menu("mainWindowMenu", edit=True, postMenuCommand=new_pmc)

@@ -118,9 +118,11 @@ def test_pad_text(inp, expected):
     assert pad_text(inp) == expected
 
 
-def test_pad_text_coerces_non_strings():
-    assert pad_text(42) == "42"  # str(42) = "42", len 2, passes through
-    assert pad_text(1) == "  "  # str(1) = "1", len 1, padded
+def test_pad_text_requires_strings():
+    # pad_text no longer coerces: all call sites already pass str, and a
+    # non-str argument is a caller bug that should surface loudly.
+    with pytest.raises(TypeError):
+        pad_text(42)
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +170,9 @@ def test_get_file_size_str_units(b, suffix):
 
 
 def test_get_file_size_str_format():
-    # Note: current implementation produces a double space because the unit
-    # list entries already include a leading space (" KB" etc.) and the
-    # f-string adds another. This test pins the *current* behavior; if the
-    # function is cleaned up to single-space, update this assertion.
-    assert get_file_size_str(1536) == "1.50  KB"
-    assert get_file_size_str(0) == "0.00  bytes"
+    # Unit strings carry no leading space; the f-string supplies the separator.
+    assert get_file_size_str(1536) == "1.50 KB"
+    assert get_file_size_str(0) == "0.00 bytes"
 
 
 # ---------------------------------------------------------------------------
@@ -685,9 +684,10 @@ def test_jsonsharedsettings_load_missing_file_uses_defaults(tmp_path):
     # No file, defaults kept.
     assert s.name == "default_name"
     assert s.interval == 10
-    # A warning was issued.
+    # A warning was issued (first run is not an error: the message says the
+    # file will be created rather than reporting a load failure).
     assert len(warnings) == 1
-    assert "Error loading" in warnings[0]
+    assert "Preferences file not found" in warnings[0]
 
 
 def test_jsonsharedsettings_load_malformed_json_uses_defaults(tmp_path):

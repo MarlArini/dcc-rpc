@@ -20,12 +20,14 @@ What we cover:
   - uninstall_settings_menu deletes the menu item; no-op when it wasn't
     installed
   - mp_show_settings_dialog constructs a MayaPresenceSettings, stores it in
-    MP_SETTINGS_WINDOW, and replaces a previously-open dialog
-  - field-to-widget construction over MPSettings, which adds many extra
-    Detail-group fields plus a whole new 'Render Extensions' group
-  - controller-driven sensitivity reaches the Maya-specific Details fields
+    settings_menu.MP_SETTINGS_WINDOW, and replaces a previously-open dialog
+  - field-to-widget construction over MPSettings, which adds the RenderSettings
+    Detail-group fields, a countExtensions toggle in General, and a 'Rendering'
+    group for the Maya-only render options
+  - controller-driven sensitivity reaches the Maya-specific Details fields and
+    stops at the Rendering group
   - reset-to-defaults restores fields including the _INITIAL_DEFAULTS
-    overrides and Maya-specific render-extension toggles
+    overrides and countExtensions
 """
 from __future__ import annotations
 from dataclasses import fields
@@ -48,11 +50,29 @@ pytestmark = pytest.mark.gui
 
 
 @pytest.fixture
-def menu_state_clean():
-    """Snapshot/restore MP_SETTINGS_WINDOW."""
-    snap = mp.MP_SETTINGS_WINDOW
-    yield
-    mp.MP_SETTINGS_WINDOW = snap
+def settings_window():
+    """Yield the module that owns MP_SETTINGS_WINDOW, with the singleton reset.
+
+    mp_show_settings_dialog rebinds MP_SETTINGS_WINDOW via `global`, so it has
+    to be read and written on mayapresence_util.settings_menu — a copy imported
+    onto maya_presence would go stale the moment a dialog opens, which is why
+    maya_presence.py doesn't re-export it (same reasoning as MP_WORKER).
+
+    Any dialog a test opened is closed on the way out so `pytest -m gui`
+    doesn't leave windows on screen."""
+    from mayapresence_util import settings_menu  # noqa: PLC0415
+
+    snap = settings_menu.MP_SETTINGS_WINDOW
+    settings_menu.MP_SETTINGS_WINDOW = None
+    yield settings_menu
+    opened = settings_menu.MP_SETTINGS_WINDOW
+    if opened is not None and opened is not snap:
+        try:
+            opened.close()
+            opened.deleteLater()
+        except RuntimeError:
+            pass
+    settings_menu.MP_SETTINGS_WINDOW = snap
 
 
 @pytest.fixture
@@ -203,39 +223,48 @@ def test_uninstall_no_op_when_not_installed(cmds):
 # ---------------------------------------------------------------------------
 
 
-def test_open_settings_menu_creates_dialog(menu_state_clean):
-    mp.MP_SETTINGS_WINDOW = None
-    mp.mp_show_settings_dialog()
-    assert isinstance(mp.MP_SETTINGS_WINDOW, mp.MayaPresenceSettings)
-    assert "Maya" in mp.MP_SETTINGS_WINDOW.windowTitle()
+def test_open_settings_menu_creates_dialog(settings_window):
+    returned = mp.mp_show_settings_dialog()
+    assert isinstance(settings_window.MP_SETTINGS_WINDOW, mp.MayaPresenceSettings)
+    assert settings_window.MP_SETTINGS_WINDOW is returned
+    assert "Maya" in settings_window.MP_SETTINGS_WINDOW.windowTitle()
 
 
-def test_open_settings_menu_replaces_existing(menu_state_clean):
-    mp.MP_SETTINGS_WINDOW = None
+def test_open_settings_menu_replaces_existing(settings_window):
+    """Unlike the Qt-hosted plugins (which reuse one dialog via
+    RPCBasePlugin.show_qt_window), Maya closes and recreates: the dockable
+    mixin's window can be torn down by Maya's own UI teardown, so a fresh
+    instance each time avoids reusing a dead wrapper."""
     mp.mp_show_settings_dialog()
-    first = mp.MP_SETTINGS_WINDOW
+    first = settings_window.MP_SETTINGS_WINDOW
     mp.mp_show_settings_dialog()
-    second = mp.MP_SETTINGS_WINDOW
+    second = settings_window.MP_SETTINGS_WINDOW
     assert first is not second
     assert isinstance(second, mp.MayaPresenceSettings)
 
 
-def test_install_command_opens_dialog(cmds, menu_state_clean):
+def test_install_command_opens_dialog(cmds, settings_window):
     """Wire test: firing the registered menuItem's command path should result
     in MP_SETTINGS_WINDOW being populated. The menuItem itself is created by
     _mp_add_settings_menu_item (what the PMC would call on first menu open);
     we invoke it directly here, then trigger the command the same way Maya
     would (with a positional 'state' arg the lambda ignores)."""
-    mp.MP_SETTINGS_WINDOW = None
     mp._mp_add_settings_menu_item()
     cmd = cmds.get_state().menu_items["mayaPresenceSettingsMenuItem"]["command"]
     cmd(None)
-    assert isinstance(mp.MP_SETTINGS_WINDOW, mp.MayaPresenceSettings)
+    assert isinstance(settings_window.MP_SETTINGS_WINDOW, mp.MayaPresenceSettings)
 
 
 # ---------------------------------------------------------------------------
 # Field-to-widget construction
 # ---------------------------------------------------------------------------
+
+
+def test_maya_dialog_builds_on_the_shared_qt_menu(dialog):
+    """MayaPresenceSettings is MayaQWidgetDockableMixin + QtSettingsGUIMenu, so
+    every dialog behavior tested below comes from the shared base class."""
+    assert issubclass(mp.MayaPresenceSettings, QtSettingsGUIMenu)
+    assert isinstance(dialog, QtSettingsGUIMenu)
 
 
 def test_dialog_object_name_uses_maya_app_name(dialog):
@@ -249,11 +278,11 @@ def test_dialog_creates_widget_for_every_metadata_field(dialog):
         assert f.name in dialog._gui_widgets, f"missing widget for {f.name}"
 
 
-def test_dialog_groups_include_render_extensions(dialog):
-    """Maya's MPSettings adds a 'Render Extensions' group on top of the
-    SharedSettings standard five."""
+def test_dialog_groups_include_rendering(dialog):
+    """Maya's MPSettings adds a 'Rendering' group on top of the SharedSettings
+    standard five."""
     assert set(dialog._groups.keys()) == {
-        "General", "Icons", "Details", "State", "Buttons", "Render Extensions",
+        "General", "Icons", "Details", "State", "Buttons", "Rendering",
     }
 
 
@@ -276,23 +305,33 @@ def test_dialog_widget_types_match_maya_field_types(dialog):
 
 
 def test_dialog_includes_maya_specific_details_fields(dialog):
-    """The Maya plugin adds five fields to the Details group on top of
-    SharedSettings — each must get its own checkbox."""
+    """The RenderSettings mixin adds four fields to the Details group on top of
+    SharedSettings — each must get its own checkbox. (displayGPU is Maya's own
+    and lives in the Rendering group, not here.)"""
     details_fields = {f.name for f in dialog._groups["Details"]}
     for name in (
-        "displayEngine", "displayGPU", "displayRenderStats",
-        "displayFileName", "displayFrames",
+        "displayEngine", "displayRenderStats", "displayFileName", "displayFrames",
     ):
         assert name in details_fields
         assert isinstance(dialog._gui_widgets[name], QtWidgets.QCheckBox)
+    assert "displayGPU" not in details_fields
 
 
-def test_dialog_render_extensions_group_has_single_toggle(dialog):
+def test_dialog_rendering_group_holds_maya_render_toggles(dialog):
+    """The Rendering group carries the two Maya-only render options: the MEL
+    render-hook install toggle and the GPU-name display."""
+    render_fields = {f.name for f in dialog._groups["Rendering"]}
+    assert render_fields == {"useRenderHooks", "displayGPU"}
+    for name in render_fields:
+        assert isinstance(dialog._gui_widgets[name], QtWidgets.QCheckBox)
+
+
+def test_dialog_count_extensions_is_a_general_toggle(dialog):
     """The per-engine countArnold/countRS/countPxr/countVRay fields were
     consolidated into one countExtensions checkbox covering all third-party
-    renderers."""
-    ext_fields = {f.name for f in dialog._groups["Render Extensions"]}
-    assert ext_fields == {"countExtensions"}
+    renderers. It sits in General — it affects the light/material/texture
+    counts, which are displayed whether or not a render is running."""
+    assert "countExtensions" in {f.name for f in dialog._groups["General"]}
     assert isinstance(dialog._gui_widgets["countExtensions"], QtWidgets.QCheckBox)
 
 
@@ -326,22 +365,25 @@ def test_controller_dict_includes_maya_masters_and_controls(dialog):
 
 
 def test_details_master_controls_maya_extra_fields(dialog):
-    """All five Maya-specific Detail fields should be reachable by the
-    Details group_master."""
+    """The four RenderSettings Detail fields should be reachable by the
+    Details group_master. displayGPU is in Rendering, so it is not — turning
+    the details field off must not gray out a Rendering-group option."""
     controlled = dialog._controllers["enableDetails"]
     for name in (
-        "displayEngine", "displayGPU", "displayRenderStats",
-        "displayFileName", "displayFrames",
+        "displayEngine", "displayRenderStats", "displayFileName", "displayFrames",
     ):
         assert name in controlled
+    assert "displayGPU" not in controlled
 
 
-def test_render_extensions_group_has_no_master(dialog):
-    """The Render Extensions group has no group_master — countExtensions
-    isn't referenced as a controller. Pins that a future maintainer who
-    decides to add a master notices the test."""
+def test_rendering_group_has_no_master(dialog):
+    """Neither the Rendering group nor countExtensions declares a
+    group_master, so none of them appear as controllers. Pins that a future
+    maintainer who decides to add a master notices the test."""
     controllers = dialog._controllers
     assert "countExtensions" not in controllers
+    assert "useRenderHooks" not in controllers
+    assert "displayGPU" not in controllers
 
 
 def test_button2_disabled_widgets_grayed_by_default(dialog):
@@ -359,12 +401,14 @@ def test_details_master_disable_grays_maya_extras(dialog):
     dialog._gui_widgets["enableDetails"].setChecked(False)
     for name in (
         "detailsType", "customDetails", "detailsCycle",
-        "displayEngine", "displayGPU", "displayRenderStats",
+        "displayEngine", "displayRenderStats",
         "displayFileName", "displayFrames",
     ):
         assert dialog._gui_widgets[name].isEnabled() is False, (
             f"{name} should be disabled when enableDetails is off"
         )
+    # Rendering-group options are independent of the Details master.
+    assert dialog._gui_widgets["displayGPU"].isEnabled() is True
 
 
 # ---------------------------------------------------------------------------

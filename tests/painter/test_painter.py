@@ -873,7 +873,7 @@ def test_update_small_icon_colored_disabled_paint_with_material_shows_painting_i
 
     sp_plugin_clean.update_small_icon(ctx)
     assert sp_plugin_clean.details.small_icon == "paint"
-    assert sp_plugin_clean.details.small_icon_text == "Painting in Worn Leather"
+    assert sp_plugin_clean.details.small_icon_text == "Painting in Worn Leather (material)"
 
 
 def test_update_small_icon_no_active_tool_clears_icon(sp, sp_plugin_clean):

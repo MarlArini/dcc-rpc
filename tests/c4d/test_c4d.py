@@ -15,8 +15,6 @@ on the fake document the plugin's BaseDocument exposes — e.g.
     assert ctx.get_mesh_count() == "1 mesh"
 """
 from __future__ import annotations
-import os
-import tempfile
 
 import pytest
 
@@ -488,8 +486,10 @@ def test_update_small_icon_mode_path_polygon(c4d_mod, c4dp,
     c4d_mod.set_state(active_doc=c4d_mod.make_document(mode=c4d_mod.Mpolygons))
     ctx = c4dp.C4DContext.capture()
     c4dp.c4d_update_small_icon(ctx)
-    assert fresh_details.small_icon == "polygon"
-    assert fresh_details.small_icon_text == "Polygon"
+    # The Discord asset is polygons.png — plural, matching _C4D_MODES. The
+    # hover text is the same _C4D_MODES value, so it is plural too.
+    assert fresh_details.small_icon == "polygons"
+    assert fresh_details.small_icon_text == "Polygons"
 
 
 def test_update_small_icon_mode_with_space_takes_first_word(c4d_mod, c4dp,
@@ -774,9 +774,147 @@ def test_sync_prefs_unknown_int_falls_back_to_default(c4d_mod, c4dp, prefs_insta
     bc = prefs_instance.GetBaseContainer()
     bc.SetInt32(int(c4dp.C4DP.C4DPRESENCE_DTYPE), 9999)
     c4dp._sync_prefs(bc)
-    # Default for DTYPE is INFODOC (an IntEnum); since 9999 isn't in the map
-    # the fallback kicks in. The fallback uses the dispatch's `default` arg.
-    # That default is C4DP.C4DPRESENCE_INFODOC, which itself isn't a string,
-    # so this test just confirms _sync_prefs doesn't crash on the unknown
-    # value and returns *something* (covering the get(..., default) branch).
-    assert c4dp.C4DP_PREFS.detailsType is not None
+    # The fallback has to be a *string* key from C4DP_DISPATCH_TYPES. Falling
+    # back to the dispatch table's declared default would leave the IntEnum
+    # C4DP.C4DPRESENCE_INFODOC on the prefs object, and the display-type lookup
+    # would then miss and blank the field.
+    assert c4dp.C4DP_PREFS.detailsType == "document"
+    assert isinstance(c4dp.C4DP_PREFS.detailsType, str)
+
+
+def test_sync_prefs_unknown_state_int_falls_back_to_object(
+    c4d_mod, c4dp, prefs_instance
+):
+    """The state slot's fallback is its own declared default ("object"), not
+    the details slot's."""
+    prefs_instance.Init(node=None, isCloneInit=False)
+    bc = prefs_instance.GetBaseContainer()
+    bc.SetInt32(int(c4dp.C4DP.C4DPRESENCE_STYPE), 9999)
+    c4dp._sync_prefs(bc)
+    assert c4dp.C4DP_PREFS.stateType == "object"
+
+
+# ---------------------------------------------------------------------------
+# C4DPPresenceMessage.CoreMessage — the seen-document memo.
+#
+# The memo exists so switching back to an already-visited document does not
+# re-reset the elapsed timer. It used to grow for the life of the session and
+# keep every BaseDocument wrapper the user ever opened alive with it; the tick
+# now prunes it against C4D's open-document list.
+# ---------------------------------------------------------------------------
+
+
+def test_core_message_prunes_closed_documents_from_memo(c4d_mod, c4dp):
+    """A document that is no longer in the open-document list is dropped from
+    the memo, so its BaseDocument wrapper stops being reachable."""
+    kept = c4d_mod.make_document(name="kept.c4d")
+    closed = c4d_mod.make_document(name="closed.c4d")
+    handler = c4dp.C4DPPresenceMessage()
+    handler.seen_documents = {kept, closed}
+    c4d_mod.set_state(active_doc=kept, open_docs=[kept])
+
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+
+    assert kept in handler.seen_documents
+    assert closed not in handler.seen_documents
+
+
+def test_core_message_empty_document_walk_leaves_memo_alone(c4d_mod, c4dp):
+    """If the open-document walk yields nothing, treat it as 'no answer' and
+    keep the memo — wiping it would spuriously reset the timer."""
+    doc = c4d_mod.make_document(name="scene.c4d")
+    handler = c4dp.C4DPPresenceMessage()
+    handler.seen_documents = {doc}
+    c4d_mod.set_state(active_doc=doc, open_docs=[])
+
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+
+    assert doc in handler.seen_documents
+
+
+def test_core_message_reopened_document_resets_timer_again(c4d_mod, c4dp):
+    """Because closed documents leave the memo, reopening one counts as new
+    and resets the elapsed timer (matching 'reset when a new file is opened')."""
+    first = c4d_mod.make_document(name="a.c4d")
+    second = c4d_mod.make_document(name="b.c4d")
+    handler = c4dp.C4DPPresenceMessage()
+    c4dp.C4DP_PREFS.resetTimer = True
+
+    c4d_mod.set_state(active_doc=first, open_docs=[first])
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+    assert handler.seen_documents == {first}
+
+    # a.c4d closed, b.c4d opened.
+    c4d_mod.set_state(active_doc=second, open_docs=[second])
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+    assert handler.seen_documents == {second}
+
+
+def test_core_message_second_tick_same_document_is_not_new(c4d_mod, c4dp):
+    """The memo still does its job: a document already in it isn't re-added
+    and doesn't re-reset the timer."""
+    doc = c4d_mod.make_document(name="scene.c4d")
+    handler = c4dp.C4DPPresenceMessage()
+    c4d_mod.set_state(active_doc=doc, open_docs=[doc])
+
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+    c4dp.C4DP_SESSION.start_time = 0.0
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+
+    assert c4dp.C4DP_SESSION.start_time == 0.0
+
+
+# ---------------------------------------------------------------------------
+# C4DPPresenceMessage.CoreMessage — render start/stop polling.
+#
+# C4D delivers no CoreMessage for render begin/end, so the 1s tick polls
+# CheckIsRunning and latches the render metadata on the transition.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("running_flag", ["editor_rendering", "external_rendering"])
+def test_core_message_latches_render_info_on_start(c4d_mod, c4dp, running_flag):
+    """Either render mode flips is_rendering and captures the document name,
+    resolution and engine once, at the transition."""
+    doc = c4d_mod.make_document(
+        name="shot.c4d",
+        render_engine=c4d_mod.RDATA_RENDERENGINE_REDSHIFT,
+        render_resolution=(1920, 1080),
+    )
+    handler = c4dp.C4DPPresenceMessage()
+    c4dp.C4DP_SESSION.is_rendering = False
+    c4d_mod.set_state(active_doc=doc, open_docs=[doc], **{running_flag: True})
+
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+
+    assert c4dp.C4DP_SESSION.is_rendering is True
+    assert c4dp.C4DP_SESSION.rendering_doc == "shot.c4d"
+    assert c4dp.C4DP_SESSION.render_res == (1920, 1080)
+    assert c4dp.C4DP_SESSION.render_engine == "Redshift"
+
+
+def test_core_message_unknown_engine_id_falls_back_to_label(c4d_mod, c4dp):
+    """An engine id outside _C4D_RENDER_ENGINES still yields a displayable
+    string rather than a raw int."""
+    doc = c4d_mod.make_document(name="shot.c4d", render_engine=123456789)
+    handler = c4dp.C4DPPresenceMessage()
+    c4dp.C4DP_SESSION.is_rendering = False
+    c4d_mod.set_state(active_doc=doc, open_docs=[doc], editor_rendering=True)
+
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+
+    assert c4dp.C4DP_SESSION.render_engine == "Unknown render engine"
+
+
+def test_core_message_clears_is_rendering_when_render_stops(c4d_mod, c4dp):
+    doc = c4d_mod.make_document(name="shot.c4d")
+    handler = c4dp.C4DPPresenceMessage()
+    c4dp.C4DP_SESSION.is_rendering = True
+    c4d_mod.set_state(
+        active_doc=doc, open_docs=[doc],
+        editor_rendering=False, external_rendering=False,
+    )
+
+    handler.CoreMessage(c4d_mod.MSG_TIMER, c4d_mod.BaseContainer())
+
+    assert c4dp.C4DP_SESSION.is_rendering is False

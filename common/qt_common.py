@@ -44,8 +44,10 @@ if QtCore is not None:
         by dynamically building a form from the dataclass fields of the settings.
         """
 
+        _default_widgets = {bool: "checkbox", int: "spinbox", str: "lineedit"}
+
         def __init__(self, prefs, refresh_func, app_name, parent=None):
-            super(QtSettingsGUIMenu, self).__init__(parent=parent)
+            super().__init__(parent=parent)
             self.setObjectName(f"{app_name}PresenceSettingsDialog")
             self.setWindowTitle(f"{app_name}Presence — Settings")
             self.setWindowFlags(
@@ -60,14 +62,15 @@ if QtCore is not None:
             self._refresh = refresh_func
             self._timer = QtCore.QTimer(singleShot=True, interval=1000)
             self._timer.timeout.connect(self._refresh)
+            # Set before _build(): the builders assign widget values before
+            # connecting their signals, but _set() reads this flag, so it has
+            # to exist for any stray early emission.
+            self._building = False
             self._groups = self._build_groups()
             self._build()
             self._controllers = self._build_controller_dict()
             self._refresh_enabled_states()
-            self._building = False
             self._assemble()
-
-        _default_widgets = {bool: "checkbox", int: "spinbox", str: "lineedit"}
 
         def _widget_kind(self, f: Field):
             resolved = get_type_hints(type(self._prefs))[f.name]
@@ -272,12 +275,12 @@ if QtCore is not None:
             for that key failed to load and `default` will be used as the value."""
             if not key:
                 self._warn(
-                    f"[{self._app_name.capitalize()}Presence] Error loading preferences: "
+                    f"[{self._app_name.title()}Presence] Error loading preferences: "
                     "falling back to default settings"
                 )
             else:
                 self._warn(
-                    f"[{self._app_name.capitalize()}Presence] Unable to find key {key} in"
+                    f"[{self._app_name.title()}Presence] Unable to find key {key} in"
                     f" preferences (using default value of {str(default)})"
                 )
 
@@ -294,6 +297,12 @@ if QtCore is not None:
             try:
                 with open(self._path, "r", encoding="utf-8") as prefs_fp:
                     prefs_json = json.load(prefs_fp)
+            except FileNotFoundError:
+                self._warn(
+                    f"[{self._app_name.title()}Presence]"
+                    " Preferences file not found. Creating..."
+                )
+                return
             except (OSError, json.JSONDecodeError):  # fmt: skip
                 self._load_warn()
                 return
@@ -320,8 +329,8 @@ if QtCore is not None:
                     )
             except (OSError, TypeError) as e:
                 self._warn(
-                    f"[{self._app_name.capitalize()}Presence] Error writing"
-                    f"new plugin preference: {e}"
+                    f"[{self._app_name.title()}Presence] Error writing"
+                    f" new plugin preference: {e}"
                 )
 
         def __setattr__(self, name: str, value: Any) -> None:
@@ -443,12 +452,13 @@ if QtCore is not None:
 
         def update_presence(self):
             if not self.prefs.generalEnable:
-                if self.session.connected:
+                if self.session.connected and not self.session.cleared:
                     try:
                         self.rpc_client.clear()
+                        self.session.cleared = True
                     except Exception as e:  # noqa: BLE001
                         self._error(
-                            f"[{self._app_name.capitalize()}Presence] clear failed: {e}"
+                            f"[{self._app_name.title()}Presence] clear failed: {e}"
                         )
                         self.session.connected = False
                 return
@@ -459,12 +469,15 @@ if QtCore is not None:
             ctx = self._capture()
             if ctx is None:
                 self._warn(
-                    f"[{self._app_name.capitalize()}Presence] Unable to get application context"
+                    f"[{self._app_name.title()}Presence] Unable to get application context"
                 )
-                # No project open; show idle state.
+                # No project open; show idle state. Clear the small icon's
+                # hover text along with the icon itself, otherwise the last
+                # context's text survives into the idle update.
                 self.details.state_text = "No project open"
                 self.details.details_text = ""
                 self.details.small_icon = None
+                self.details.small_icon_text = ""
                 self.push_rpc_update()
                 return
             if self.prefs.detailsCycle or self.prefs.stateCycle:
@@ -504,12 +517,14 @@ if QtCore is not None:
             window_class: type[QtSettingsGUIMenu] = QtSettingsGUIMenu,
         ):
             if not self.settings_window:
-                self._make_qt_window(app_name, parent, window_class)
-            if not self.settings_window:
-                self._warn(
-                    f"[{self._app_name.title()}Presence] Could not create settings window"
-                )
-                return
+                try:
+                    self._make_qt_window(app_name, parent, window_class)
+                except Exception as e:  # noqa: BLE001
+                    self._warn(
+                        f"[{self._app_name.title()}Presence] Could not create"
+                        f" settings window: {e}"
+                    )
+                    return
             self.settings_window.load_from_prefs()
             self.settings_window.show()
             self.settings_window.raise_()

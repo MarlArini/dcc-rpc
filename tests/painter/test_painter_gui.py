@@ -12,14 +12,12 @@ parent. So tests that exercise that path monkeypatch `sp.ui.get_main_window`
 to return a fresh real QMainWindow.
 
 What we cover:
-  - install_settings_menu: 'Discord' menu added with three actions; SP_START
-    disabled and SP_STOP enabled at install time; SP_PLUGIN.menubar_item set
+  - install_settings_menu: 'Discord' menu added with its single Settings
+    action; SP_PLUGIN.menubar_item set
   - uninstall_settings_menu: 'Discord' menu removed; settings_window closed
-  - pause_presence / restart_presence: prefs.generalEnable toggled and the
-    start/stop actions' enabled state inverted
   - open_settings_menu / close_settings_menu: creates and tears down a
     QtSettingsGUIMenu attached to SP_PLUGIN.settings_window; calling open
-    twice replaces the first dialog
+    twice reuses (and re-raises) the same dialog
   - field-to-widget construction over the actual SPSettings (which mixes
     ColoredIconSettings + SharedSettings + JSONSharedSettings)
   - controller-driven sensitivity for both `group_master` (enableDetails,
@@ -63,22 +61,26 @@ def real_main_window(sp, monkeypatch):
 
 @pytest.fixture
 def menu_state_clean():
-    """Snapshot/restore SP_PLUGIN.menubar_item, settings_window, prefs.generalEnable
-    and the module-level SP_START_ACTION / SP_STOP_ACTION globals so tests in
-    this file don't leak state into each other or the SPContext tests."""
+    """Snapshot/restore SP_PLUGIN.menubar_item, settings_window and
+    prefs.generalEnable so tests in this file don't leak state into each other
+    or the SPContext tests. Any dialog a test opened is closed on the way out,
+    so a `pytest -m gui` run doesn't leave windows on screen."""
     snap = (
         pp.SP_PLUGIN.menubar_item,
         pp.SP_PLUGIN.settings_window,
         pp.SP_PLUGIN.prefs.generalEnable,
-        pp.SP_START_ACTION,
-        pp.SP_STOP_ACTION,
     )
     yield
+    opened = pp.SP_PLUGIN.settings_window
+    if opened is not None and opened is not snap[1]:
+        try:
+            opened.close()
+            opened.deleteLater()
+        except RuntimeError:
+            pass
     (pp.SP_PLUGIN.menubar_item,
      pp.SP_PLUGIN.settings_window,
-     pp.SP_PLUGIN.prefs.generalEnable) = snap[:3]
-    pp.SP_START_ACTION = snap[3]
-    pp.SP_STOP_ACTION = snap[4]
+     pp.SP_PLUGIN.prefs.generalEnable) = snap
 
 
 @pytest.fixture
@@ -121,23 +123,24 @@ def test_install_settings_menu_adds_discord_menu(real_main_window, menu_state_cl
     assert pp.SP_PLUGIN.menubar_item.title() == "Discord"
 
 
-def test_install_settings_menu_adds_three_actions(real_main_window, menu_state_clean):
+def test_install_settings_menu_adds_settings_action(real_main_window, menu_state_clean):
+    """The Discord menu carries exactly one entry. (Pause/Restart Presence were
+    cut before release — presence is toggled from the settings dialog instead.)"""
     pp.sp_install_settings_menu()
     assert pp.SP_PLUGIN.menubar_item is not None
     action_texts = [a.text() for a in pp.SP_PLUGIN.menubar_item.actions()]
-    assert action_texts == ["Settings", "Pause Presence", "Restart Presence"]
+    assert action_texts == ["Settings"]
 
 
-def test_install_settings_menu_initial_action_enabled_states(
+def test_install_settings_menu_tags_menu_action_objectname(
     real_main_window, menu_state_clean
 ):
-    """At install time SP_STOP_ACTION (Pause) is the live one, SP_START_ACTION
-    (Restart) is grayed out — the UI mirrors that the plugin is currently active."""
+    """The dedup lookup in get_menu_action keys off the menuAction's objectName,
+    not the QMenu's — if install stopped setting it, reloads would stack
+    duplicate Discord menus."""
     pp.sp_install_settings_menu()
-    assert pp.SP_STOP_ACTION is not None
-    assert pp.SP_START_ACTION is not None
-    assert pp.SP_STOP_ACTION.isEnabled() is True
-    assert pp.SP_START_ACTION.isEnabled() is False
+    assert pp.get_menu_action() is not None
+    assert pp.SP_PLUGIN.menubar_item.menuAction().objectName() == pp._MENU_OBJNAME
 
 
 def test_uninstall_settings_menu_removes_discord_menu(
@@ -169,7 +172,9 @@ def test_uninstall_handles_stale_menubar_item_wrapper(
 
     We simulate that by installing the menu, deleting the C++ side of the
     QMenu wrapper via shiboken6, and adding a fresh Discord menu directly to
-    the menu bar so the visible state matches what a user would see. The
+    the menu bar so the visible state matches what a user would see. The fresh
+    menu is tagged the way sp_install_settings_menu tags its own, since a
+    leftover from a previous install would carry that objectName. The
     uninstall must find and remove the Discord menu anyway, then clear
     menubar_item to None — not raise or leave the menu in place."""
     import shiboken6
@@ -178,6 +183,7 @@ def test_uninstall_handles_stale_menubar_item_wrapper(
     assert "Discord" in [a.text() for a in real_main_window.menuBar().actions()]
     stale_menu = pp.SP_PLUGIN.menubar_item
     fresh_menu = real_main_window.menuBar().addMenu("Discord")
+    fresh_menu.menuAction().setObjectName(pp._MENU_OBJNAME)
     pp.SP_PLUGIN.menubar_item = stale_menu
     shiboken6.delete(stale_menu)
     with pytest.raises(RuntimeError):
@@ -191,8 +197,10 @@ def test_uninstall_handles_stale_menubar_item_wrapper(
 def test_install_strips_preexisting_discord_menu(real_main_window, menu_state_clean):
     """If a previous failed uninstall left a Discord menu in the bar, a
     subsequent install must not stack a second one on top — it should
-    remove the stale entry first."""
-    real_main_window.menuBar().addMenu("Discord")
+    remove the stale entry first. The leftover is tagged with the install
+    objectName because that is how a real leftover would look."""
+    leftover = real_main_window.menuBar().addMenu("Discord")
+    leftover.menuAction().setObjectName(pp._MENU_OBJNAME)
     pp.sp_install_settings_menu()
     discord_actions = [
         a for a in real_main_window.menuBar().actions() if a.text() == "Discord"
@@ -205,70 +213,14 @@ def test_uninstall_closes_open_settings_window(real_main_window, menu_state_clea
     a dangling settings dialog gets torn down with the menu."""
     pp.sp_install_settings_menu()
     pp.sp_open_settings_menu()
-    assert pp.SP_PLUGIN.settings_window is not None
+    window = pp.SP_PLUGIN.settings_window
+    assert window is not None
+    assert window.isVisible() is True
     pp.sp_uninstall_settings_menu()
-    # The settings window object is gone (set to None by close, or closed Qt-side).
-    # The close func sets nothing — we just confirm the dialog is closed.
-    # sp_close_settings_menu calls window.close(); window.deleteLater() — so
-    # the dialog is no longer visible.
-
-
-# ---------------------------------------------------------------------------
-# pause_presence / restart_presence (toggle generalEnable + action sensitivity)
-# ---------------------------------------------------------------------------
-
-
-def test_pause_presence_disables_general_enable(real_main_window, menu_state_clean):
-    pp.sp_install_settings_menu()
-    pp.SP_PLUGIN.prefs.generalEnable = True
-    pp.sp_pause_presence()
-    assert pp.SP_PLUGIN.prefs.generalEnable is False
-
-
-def test_pause_presence_toggles_action_enabled_state(
-    real_main_window, menu_state_clean
-):
-    pp.sp_install_settings_menu()
-    pp.sp_pause_presence()
-    # After pausing: Restart is the live action, Pause is grayed out.
-    assert pp.SP_START_ACTION.isEnabled() is True
-    assert pp.SP_STOP_ACTION.isEnabled() is False
-
-
-def test_restart_presence_enables_general_enable(real_main_window, menu_state_clean):
-    pp.sp_install_settings_menu()
-    pp.SP_PLUGIN.prefs.generalEnable = False
-    pp.sp_restart_presence()
-    assert pp.SP_PLUGIN.prefs.generalEnable is True
-
-
-def test_restart_presence_toggles_action_enabled_state(
-    real_main_window, menu_state_clean
-):
-    pp.sp_install_settings_menu()
-    pp.sp_pause_presence()  # set to paused state first
-    pp.sp_restart_presence()
-    assert pp.SP_START_ACTION.isEnabled() is False
-    assert pp.SP_STOP_ACTION.isEnabled() is True
-
-
-def test_pause_then_restart_round_trips(real_main_window, menu_state_clean):
-    pp.sp_install_settings_menu()
-    pp.SP_PLUGIN.prefs.generalEnable = True
-    pp.sp_pause_presence()
-    assert pp.SP_PLUGIN.prefs.generalEnable is False
-    pp.sp_restart_presence()
-    assert pp.SP_PLUGIN.prefs.generalEnable is True
-
-
-def test_pause_with_no_actions_does_not_crash(menu_state_clean):
-    """If the install path never ran (e.g., the host has no menubar), the
-    module-level actions stay None — pause must not blow up."""
-    pp.SP_START_ACTION = None
-    pp.SP_STOP_ACTION = None
-    pp.SP_PLUGIN.prefs.generalEnable = True
-    pp.sp_pause_presence()  # no AttributeError
-    assert pp.SP_PLUGIN.prefs.generalEnable is False
+    # sp_close_settings_menu calls close() then deleteLater(). deleteLater
+    # needs an event loop iteration to land, so the wrapper is still valid
+    # here — but the dialog must already be hidden.
+    assert window.isVisible() is False
 
 
 # ---------------------------------------------------------------------------
@@ -282,15 +234,29 @@ def test_open_settings_menu_creates_dialog(real_main_window, menu_state_clean):
     assert "Painter" in pp.SP_PLUGIN.settings_window.windowTitle()
 
 
-def test_open_settings_menu_replaces_existing(real_main_window, menu_state_clean):
-    """Opening twice should produce two different dialog instances — the first
-    is closed/deleted before the second is created."""
+def test_open_settings_menu_reuses_existing_dialog(real_main_window, menu_state_clean):
+    """RPCBasePlugin.show_qt_window keeps one dialog per plugin: the second
+    open reuses the same instance, refreshes it from prefs and re-raises it
+    rather than building a replacement. (Maya's mp_show_settings_dialog is the
+    one that closes-and-recreates; Painter goes through the shared base.)"""
     pp.sp_open_settings_menu()
     first = pp.SP_PLUGIN.settings_window
+    assert isinstance(first, QtSettingsGUIMenu)
     pp.sp_open_settings_menu()
-    second = pp.SP_PLUGIN.settings_window
-    assert first is not second
-    assert isinstance(second, QtSettingsGUIMenu)
+    assert pp.SP_PLUGIN.settings_window is first
+    assert first.isVisible() is True
+
+
+def test_open_settings_menu_reloads_widgets_from_prefs(
+    real_main_window, menu_state_clean, prefs_snapshot
+):
+    """Reopening re-syncs the widgets, so a pref changed behind the dialog's
+    back (menu toggle, reset, another host callback) shows up on reopen."""
+    pp.sp_open_settings_menu()
+    window = pp.SP_PLUGIN.settings_window
+    object.__setattr__(prefs_snapshot, "generalUpdate", 42)
+    pp.sp_open_settings_menu()
+    assert window._gui_widgets["generalUpdate"].value() == 42
 
 
 def test_close_settings_menu_handles_none(menu_state_clean):

@@ -193,9 +193,11 @@ class SessionInfo:
     """Class to hold information about a RPC session with the
     application"""
 
-    start_time: float = time.time()
-    last_update: float = 0.0
-    connected: bool = False
-    is_rendering: bool = False
-    rendered_frames: int = 0
-    cycle_iter: int = 0
+    def __init__(self):
+        self.start_time: float = time.time()
+        self.last_update: float = 0.0
+        self.connected: bool = False
+        self.cleared: bool = False
+        self.is_rendering: bool = False
+        self.rendered_frames: int = 0
+        self.cycle_iter: int = 0

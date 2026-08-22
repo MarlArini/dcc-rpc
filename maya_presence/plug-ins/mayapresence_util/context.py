@@ -12,7 +12,7 @@ from . import extension_types
 
 class MPContext:
     @classmethod
-    def capture(cls) -> "MPContext | None":
+    def capture(cls) -> MPContext:
         return cls()
 
     def get_gpu_str(self) -> str:
@@ -25,7 +25,7 @@ class MPContext:
                     card = card.replace("Radeon ", "")
                 slash_loc = card.find("/")
                 if slash_loc != -1:
-                    return card[: card.find("/")]
+                    return card[:slash_loc]
                 return card
             return ""
         except RuntimeError:
@@ -59,7 +59,7 @@ class MPContext:
 
     def get_cam_count(self) -> str:
         cams = len(cmds.ls(cameras=True)) - 4  # persp,top,front,side
-        return mp_plural(cams, "camera")
+        return mp_plural(max(0, cams), "camera")
 
     def get_light_count(self) -> str:
         lights = cmds.ls(lights=True) or []
@@ -188,9 +188,12 @@ class MPContext:
                 return None
         return 24
 
-    def get_current_frame(self) -> str:
+    def get_current_frame(self) -> str | None:
         fps = self.get_fps()
-        return f"Frame {int(cmds.currentTime(query=True))} ({fps}fps)"
+        if fps:
+            return f"Frame {int(cmds.currentTime(query=True))} ({fps}fps)"
+        else:
+            return None
 
     def get_user_context(self) -> str | None:
         current_ctx = cmds.currentCtx()

@@ -82,8 +82,8 @@ def mp_update_small_icon(ctx: MPContext):
         try:
             # "Modeling - Expert", "Pose Sculpting", etc.
             space_name = (
-                cmds.workspaceLayoutManager(query=True, current=True).lower() or ""
-            )
+                cmds.workspaceLayoutManager(query=True, current=True) or ""
+            ).lower()
         except Exception:
             space_name = ""
         if space_name and space_name != "general":
@@ -144,17 +144,18 @@ def mp_update_presence():
         if MP_PREFS.detailsCycle or MP_PREFS.stateCycle:
             advance_cycle(MP_SESSION, MP_DISPLAY_TYPES)
         ctx = MPContext.capture()
-        if ctx is None:
-            return
-        else:
-            mp_update_large_icon(ctx)
-            mp_update_small_icon(ctx)
-            mp_update_presence_state(ctx)
-            mp_update_presence_details(ctx)
-            update_buttons(MP_UPDATE_DETAILS, MP_PREFS)
-            MP_UPDATE_DETAILS.start_time = MP_SESSION.start_time
+        mp_update_large_icon(ctx)
+        mp_update_small_icon(ctx)
+        mp_update_presence_state(ctx)
+        mp_update_presence_details(ctx)
+        update_buttons(MP_UPDATE_DETAILS, MP_PREFS)
+        MP_UPDATE_DETAILS.start_time = MP_SESSION.start_time
     except Exception as e:  # noqa: BLE001
-        mp_print(f"Failed to publish update to worker thread: {e}")
+        # MP_UPDATE_DETAILS is half-rewritten at this point (e.g. a new state
+        # but a stale details). Skip the publish rather than hand the worker an
+        # inconsistent snapshot — it keeps pushing the last good one.
+        mp_print(f"Failed to compose presence update: {e}")
+        return
     worker = _get_worker()
     if worker is not None:
         worker.publish(MP_UPDATE_DETAILS)

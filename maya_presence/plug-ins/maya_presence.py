@@ -26,7 +26,6 @@ from mayapresence_util import (  # noqa: F401  pylint: disable=unused-import
     MP_PREFS,
     MP_SESSION,
     MP_UPDATE_DETAILS,
-    MP_WORKER,
     _clear_worker,
     _get_worker,
     _set_worker,
@@ -64,7 +63,9 @@ from mayapresence_util import (  # noqa: F401  pylint: disable=unused-import
     mp_remove_callbacks,
     mp_schedule,
     # L6
+    MP_MENU_PMC,
     MayaPresenceSettings,
+    _mp_add_settings_menu_item,
     mp_install_settings_menu,
     mp_on_setting_change,
     mp_show_settings_dialog,
@@ -82,11 +83,14 @@ def maya_useNewAPI():
     pass
 
 
-# The canonical MP_WORKER reference lives in mayapresence_util.shared_state
-# (re-exported above). All reads go through _get_worker(); writes go
-# through _set_worker(). We don't keep a local module-level shadow here
-# because that would diverge from shared_state's value the moment we
-# rebind it.
+# The canonical worker reference lives in mayapresence_util.shared_state.
+# All reads go through _get_worker(); writes go through _set_worker().
+# Deliberately NOT re-exported by value here: an imported MP_WORKER binding
+# would go stale the moment shared_state rebinds it.
+#
+# settings_menu.MP_SETTINGS_WINDOW is omitted for the same reason —
+# mp_show_settings_dialog rebinds it via `global`, so reach it through
+# mayapresence_util.settings_menu rather than through this module.
 
 
 def mp_start():
@@ -142,7 +146,8 @@ def uninitializePlugin(plugin):
 
 def _mp_atexit():
     """Insurance against process exit without uninitializePlugin (e.g.
-    Maya killed). stop() drains clear+close from inside the worker."""
+    Maya killed). stop() signals the worker, joins it briefly, then runs
+    clear+close on this thread under the worker's I/O lock."""
     worker = _get_worker()
     if worker is not None:
         try:

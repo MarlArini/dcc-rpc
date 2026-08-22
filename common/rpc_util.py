@@ -18,7 +18,7 @@ def rpc_update(details: RPCUpdateDetails, client: Presence, enable_time: bool):
     """Send an update to the RPC client. May raise exceptions which must be handled."""
     client.update(
         start=details.start_time if enable_time else None,
-        state=details.state_text,
+        state=details.state_text if details.state_text else None,
         details=details.details_text if details.details_text else "  ",
         small_image=details.small_icon,
         small_text=details.small_icon_text if details.small_icon_text else None,
@@ -52,11 +52,11 @@ def connect_rpc(client: Presence, app_name: str, error: Callable = print):
         client.connect()
         return True
     except Exception as e:
-        error(f"[{app_name.capitalize()}Presence] Connection Error: {e}")
+        error(f"[{app_name.title()}Presence] Connection Error: {e}")
         return False
 
 
-def push_rpc_update(  # TODO try push again in exception case?
+def push_rpc_update(
     session: SessionInfo,
     details: RPCUpdateDetails,
     prefs: SharedSettings,
@@ -68,8 +68,7 @@ def push_rpc_update(  # TODO try push again in exception case?
     function attempts to connect and tries another push if the connection
     succeeds. If the session is connected but the update still fails, the
     connection is set to False, a new connection attempt is made, and the
-    function returns without attempting another update.
-    Returns whether or not the update went through successfully."""
+    function returns without attempting another update."""
     success = False
     if session.connected:
         try:
@@ -83,20 +82,20 @@ def push_rpc_update(  # TODO try push again in exception case?
             exceptions.ServerError,
         ) as e:
             session.connected = False
-            error(f"[{app_name.capitalize()}Presence] RPC Connection Lost: {e}")
+            error(f"[{app_name.title()}Presence] RPC Connection Lost: {e}")
             session.connected = connect_rpc(client, app_name, error)
     else:
-        error(f"[{app_name.capitalize()}Presence] Retrying...")
+        error(f"[{app_name.title()}Presence] Retrying...")
         session.connected = connect_rpc(client, app_name, error)
         if session.connected:
             push_rpc_update(session, details, prefs, client, app_name, error)
     if success:
         session.last_update = time.time()
+        session.cleared = False
 
 
 def advance_cycle(session: SessionInfo, display_types: Dict):
-    session.cycle_iter += 1
-    session.cycle_iter = session.cycle_iter % len(display_types)
+    session.cycle_iter = (session.cycle_iter + 1) % len(display_types)
 
 
 _SLOT_PEER = {"state": "details", "details": "state"}

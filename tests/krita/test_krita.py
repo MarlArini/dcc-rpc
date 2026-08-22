@@ -439,11 +439,9 @@ def test_on_file_open_editing_time(kr, kp_plugin, about_inner, expected):
 
 def test_doc_time_returns_none_when_no_record(kr, kp_plugin):
     """A document with no recorded time should produce None."""
-    doc = kr.make_document(name="Untracked")
-    view = kr.make_view()
-    ctx = KPContext(
-        instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
-    )
+    # doc_time is a staticmethod that reads Krita's active document directly,
+    # so these tests drive it through the fake's state, not through a KPContext.
+    kr.set_state(active_document=kr.make_document(name="Untracked"))
     assert KPPlugin.doc_time() is None
 
 
@@ -460,10 +458,6 @@ def test_doc_time_returns_none_when_no_record(kr, kp_plugin):
 )
 def test_doc_time_formats_hours_and_minutes(kr, kp_plugin, seconds, expected):
     doc = kr.make_document(name="Tracked")
-    view = kr.make_view()
-    ctx = KPContext(
-        instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
-    )
     kr.set_state(active_document=doc)
     KPPlugin.doc_times[doc.rootNode().uniqueId().toString()] = seconds
     # Force not idle so we get the clean "Document time: …" form.
@@ -472,12 +466,59 @@ def test_doc_time_formats_hours_and_minutes(kr, kp_plugin, seconds, expected):
     assert out == f"Document time: {expected}"
 
 
+# --- update_presence document-time accrual ---
+#
+# The accrual used to add prefs.generalUpdate per call on the assumption that
+# every call was one timer tick. on_settings_change also routes through
+# update_presence, so fiddling with the settings dialog inflated the counter.
+# It now banks real elapsed seconds.
+
+
+def _tracked_doc(kr, kp_plugin, seconds=0):
+    doc = kr.make_document(name="Tracked")
+    kr.set_state(active_document=doc, active_window=kr.make_window())
+    doc_id = doc.rootNode().uniqueId().toString()
+    KPPlugin.doc_times[doc_id] = seconds
+    KPPlugin.idle_monitor._last_input = _time.time()  # not idle
+    return doc_id
+
+
+def test_update_presence_accrues_elapsed_seconds_not_the_interval(kr, kp_plugin):
+    """Two calls 3 wall-clock seconds apart bank 3 seconds — not two times
+    generalUpdate (which defaults to 15)."""
+    doc_id = _tracked_doc(kr, kp_plugin, seconds=100)
+    kp_plugin.prefs.generalUpdate = 15
+    kp_plugin._last_accrual = _time.time() - 3
+    kp_plugin.update_presence()
+    assert KPPlugin.doc_times[doc_id] == 103
+
+
+def test_update_presence_rapid_calls_do_not_inflate_document_time(kr, kp_plugin):
+    """A burst of update_presence calls inside the same second — what a user
+    dragging the update-interval spinbox produces — banks nothing."""
+    doc_id = _tracked_doc(kr, kp_plugin, seconds=100)
+    kp_plugin._last_accrual = _time.time()
+    for _ in range(10):
+        kp_plugin.update_presence()
+    assert KPPlugin.doc_times[doc_id] == 100
+
+
+def test_update_presence_discards_idle_time_rather_than_banking_it(kr, kp_plugin):
+    """Idle seconds advance the accrual clock without being counted, so they
+    are dropped instead of landing on the counter once the user returns."""
+    doc_id = _tracked_doc(kr, kp_plugin, seconds=100)
+    KPPlugin.idle_monitor._last_input = _time.time() - 10_000  # idle
+    kp_plugin._last_accrual = _time.time() - 30
+    kp_plugin.update_presence()
+    assert KPPlugin.doc_times[doc_id] == 100
+    # The clock moved, so those 30 idle seconds can't be banked later.
+    KPPlugin.idle_monitor._last_input = _time.time()
+    kp_plugin.update_presence()
+    assert KPPlugin.doc_times[doc_id] == 100
+
+
 def test_doc_time_appends_idle_marker(kr, kp_plugin):
     doc = kr.make_document(name="Idle")
-    view = kr.make_view()
-    ctx = KPContext(
-        instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
-    )
     kr.set_state(active_document=doc)
     KPPlugin.doc_times[doc.rootNode().uniqueId().toString()] = 120
     # Force idle by pushing _last_input far into the past.

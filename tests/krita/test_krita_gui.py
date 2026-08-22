@@ -202,14 +202,17 @@ def test_open_settings_menu_creates_dialog(kr, extension):
     assert "Krita" in extension._plugin.settings_window.windowTitle()
 
 
-def test_open_settings_menu_replaces_existing(kr, extension):
+def test_open_settings_menu_reuses_existing_dialog(kr, extension):
+    """RPCBasePlugin.show_qt_window keeps one dialog per plugin: the second
+    open reuses the same instance, refreshes it from prefs and re-raises it
+    rather than building a replacement. (Maya's mp_show_settings_dialog is the
+    one that closes-and-recreates; Krita goes through the shared base.)"""
     kr.set_state(active_window=kr.make_window())
     extension.open_settings_menu()
     first = extension._plugin.settings_window
+    assert isinstance(first, QtSettingsGUIMenu)
     extension.open_settings_menu()
-    second = extension._plugin.settings_window
-    assert first is not second
-    assert isinstance(second, QtSettingsGUIMenu)
+    assert extension._plugin.settings_window is first
 
 
 def test_open_short_circuits_when_instance_none(kr, extension):
@@ -359,6 +362,9 @@ def test_reset_restores_initial_defaults_combobox(dialog, prefs_snapshot, monkey
 
 
 def test_reset_restores_base_defaults(dialog, prefs_snapshot, monkeypatch):
+    """generalUpdate has no _INITIAL_DEFAULTS override in KPSettings, so reset
+    lands on the SharedSettings base default (15) — not the 12s floor from the
+    field's `min` metadata."""
     dialog._gui_widgets["generalUpdate"].setValue(50)
     assert prefs_snapshot.generalUpdate == 50
     monkeypatch.setattr(
@@ -366,8 +372,8 @@ def test_reset_restores_base_defaults(dialog, prefs_snapshot, monkeypatch):
         staticmethod(lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes),
     )
     dialog._on_reset_clicked()
-    assert prefs_snapshot.generalUpdate == 12
-    assert dialog._gui_widgets["generalUpdate"].value() == 12
+    assert prefs_snapshot.generalUpdate == 15
+    assert dialog._gui_widgets["generalUpdate"].value() == 15
 
 
 def test_reset_no_op_when_user_cancels(dialog, prefs_snapshot, monkeypatch):

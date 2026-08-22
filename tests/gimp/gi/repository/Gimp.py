@@ -14,7 +14,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
-# Enums (use Python Enum so the plugin's _gp_get_enum_name walks ._member_map_)
+# Enums (use Python Enum so members expose `.name`, which the plugin reads
+# directly for layer modes, base types and paint modes)
 # ---------------------------------------------------------------------------
 
 class ImageBaseType(enum.Enum):

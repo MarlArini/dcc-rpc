@@ -201,6 +201,7 @@ class _State:
     before_render_callbacks: List[Tuple[Callable, tuple]] = field(default_factory=list)
     after_frame_callbacks: List[Tuple[Callable, tuple]] = field(default_factory=list)
     after_render_callbacks: List[Tuple[Callable, tuple]] = field(default_factory=list)
+    script_load_callbacks: List[Tuple[Callable, tuple]] = field(default_factory=list)
 
 
 _state = _State()
@@ -306,6 +307,17 @@ def addAfterRender(fn: Callable, args: tuple = ()) -> None:  # noqa: N802
 def removeAfterRender(fn: Callable, args: tuple = ()) -> None:  # noqa: N802
     try:
         _state.after_render_callbacks.remove((fn, args))
+    except ValueError:
+        pass
+
+
+def addOnScriptLoad(fn: Callable, args: tuple = ()) -> None:  # noqa: N802
+    _state.script_load_callbacks.append((fn, args))
+
+
+def removeOnScriptLoad(fn: Callable, args: tuple = ()) -> None:  # noqa: N802
+    try:
+        _state.script_load_callbacks.remove((fn, args))
     except ValueError:
         pass
 

@@ -437,19 +437,24 @@ from nuke_presence.menu import (  # noqa: E402
 
 @pytest.fixture
 def nuke_globals_clean():
-    """Snapshot/restore module-level Nuke globals."""
+    """Snapshot/restore module-level Nuke globals.
+
+    `cleared` is reset going *in* as well as out: nk_update_presence only
+    clears on the transition into the disabled state, so a test that leaves it
+    set would silently suppress the clear in the next test."""
     snap = (
         NK_PREFS.displaySmallIcon, NK_PREFS.displayVersion,
         NK_PREFS.enableDetails, NK_PREFS.displayRenderStats, NK_PREFS.displayFrames,
-        NK_SESSION.is_rendering,
+        NK_SESSION.is_rendering, NK_SESSION.cleared,
         NK_UPDATE_DETAILS.small_icon, NK_UPDATE_DETAILS.small_icon_text,
         NK_UPDATE_DETAILS.large_icon, NK_UPDATE_DETAILS.large_icon_text,
         NK_UPDATE_DETAILS.details_text,
     )
+    NK_SESSION.cleared = False
     yield
     (NK_PREFS.displaySmallIcon, NK_PREFS.displayVersion,
      NK_PREFS.enableDetails, NK_PREFS.displayRenderStats, NK_PREFS.displayFrames,
-     NK_SESSION.is_rendering,
+     NK_SESSION.is_rendering, NK_SESSION.cleared,
      NK_UPDATE_DETAILS.small_icon, NK_UPDATE_DETAILS.small_icon_text,
      NK_UPDATE_DETAILS.large_icon, NK_UPDATE_DETAILS.large_icon_text,
      NK_UPDATE_DETAILS.details_text) = snap
@@ -552,6 +557,22 @@ def test_nk_update_presence_disabled_when_connected_preserves_connection(
     nk_update_presence()
     assert len(calls) == 1
     assert NK_SESSION.connected is True
+
+
+def test_nk_update_presence_disabled_clears_once_not_every_tick(
+    nk, nuke_globals_clean, monkeypatch
+):
+    """The worker ticks every generalUpdate seconds while disabled; clearing
+    an already-cleared presence on each of those is pointless traffic."""
+    NK_PREFS.generalEnable = False
+    NK_SESSION.connected = True
+    calls: list[int] = []
+    monkeypatch.setattr(NK_RPC_CLIENT, "clear", lambda: calls.append(1))
+    nk_update_presence()
+    nk_update_presence()
+    nk_update_presence()
+    assert len(calls) == 1
+    assert NK_SESSION.cleared is True
 
 
 def test_nk_update_presence_disabled_clear_failure_marks_disconnected(

@@ -23,7 +23,7 @@ What we cover:
     second call while the window is visible reuses it (no flicker / leak)
   - nk_open_settings creates a fresh window after the previous was hidden
   - field-to-widget construction over NKSettings, which adds
-    `displayRenderStats`/`displayFrames` to Details and `disableNodeQueries`
+    `displayRenderStats`/`displayFrames` to Details and `displayFileName`
     to General
   - controller-driven sensitivity for group_master and controls
   - reset-to-defaults restores fields including _INITIAL_DEFAULTS overrides
@@ -105,12 +105,12 @@ def dialog(prefs_snapshot):
 
 
 def test_nk_menu_install_creates_discord_submenu(nk, menu_state_clean):
-    nm.NKMenu(nm.NK_PREFS, nm.NK_WORKER)
+    nm.NKMenu(nm.NK_PREFS)
     assert "Discord" in nk._state.top_menu.submenus
 
 
 def test_nk_menu_install_adds_three_commands(nk, menu_state_clean):
-    nm.NKMenu(nm.NK_PREFS, nm.NK_WORKER)
+    nm.NKMenu(nm.NK_PREFS)
     discord = nk._state.top_menu.submenus["Discord"]
     labels = [c.label for c in discord.commands]
     assert labels == ["Enable Rich Presence", "Disable Rich Presence", "Settings"]
@@ -120,7 +120,7 @@ def test_nk_menu_install_wires_settings_command_to_nk_open_settings(
     nk, menu_state_clean
 ):
     """The third command in the Discord submenu fires nk_open_settings."""
-    nm.NKMenu(nm.NK_PREFS, nm.NK_WORKER)
+    nm.NKMenu(nm.NK_PREFS)
     discord = nk._state.top_menu.submenus["Discord"]
     settings_cmd = next(c for c in discord.commands if c.label == "Settings")
     assert settings_cmd.command is nm.nk_open_settings
@@ -131,7 +131,7 @@ def test_nk_menu_install_mirrors_loaded_general_enable_true(nk, menu_state_clean
     than forcing it on. With generalEnable=True at install time, the Enable
     item is grayed out and the Disable item is live."""
     nm.NK_PREFS.generalEnable = True
-    fresh = nm.NKMenu(nm.NK_PREFS, nm.NK_WORKER)
+    fresh = nm.NKMenu(nm.NK_PREFS)
     assert fresh.enable_item.enabled is False
     assert fresh.disable_item.enabled is True
 
@@ -141,7 +141,7 @@ def test_nk_menu_install_mirrors_loaded_general_enable_false(nk, menu_state_clea
     presence in a previous session), the menu must reflect that, NOT
     silently flip back to enabled."""
     nm.NK_PREFS.generalEnable = False
-    fresh = nm.NKMenu(nm.NK_PREFS, nm.NK_WORKER)
+    fresh = nm.NKMenu(nm.NK_PREFS)
     assert fresh.enable_item.enabled is True
     assert fresh.disable_item.enabled is False
     # And the value was preserved, not clobbered by NKMenu.__init__.
@@ -227,6 +227,13 @@ def test_nk_open_settings_creates_new_after_hide(menu_state_clean):
 # ---------------------------------------------------------------------------
 
 
+def test_nuke_settings_window_builds_on_the_shared_qt_menu(dialog):
+    """NukeSettingsWindow is a QtSettingsGUIMenu bound to NK_PREFS, so every
+    dialog behavior tested below comes from the shared base class."""
+    assert issubclass(nm.NukeSettingsWindow, QtSettingsGUIMenu)
+    assert dialog._prefs is nm.NK_PREFS
+
+
 def test_dialog_object_name_uses_nuke_app_name(dialog):
     assert dialog.objectName() == "NukePresenceSettingsDialog"
 
@@ -266,27 +273,31 @@ def test_dialog_widget_types_match_nuke_field_types(dialog):
 
 
 def test_dialog_includes_nuke_specific_fields(dialog):
-    """The Nuke plugin adds three fields on top of SharedSettings; each
-    should appear in the right group with a checkbox widget. (The earlier
-    disableUpscaledNodes Icons-group field was dropped when the HD and
-    upscaled icon lists were merged into a single NK_ICONS catalog.)"""
+    """The Nuke plugin adds three render fields on top of SharedSettings; each
+    should get a checkbox. (The earlier disableUpscaledNodes Icons-group field
+    was dropped when the HD and upscaled icon lists were merged into a single
+    NK_ICONS catalog, and disableNodeQueries went with the non-commercial API
+    rework.)"""
     details_fields = {f.name for f in dialog._groups["Details"]}
     general_fields = {f.name for f in dialog._groups["General"]}
     assert "displayRenderStats" in details_fields
     assert "displayFrames" in details_fields
-    assert "disableNodeQueries" in general_fields
-    for name in ("displayRenderStats", "displayFrames", "disableNodeQueries"):
+    assert "displayFileName" in general_fields
+    for name in ("displayRenderStats", "displayFrames", "displayFileName"):
         assert isinstance(dialog._gui_widgets[name], QtWidgets.QCheckBox)
 
 
 def test_dialog_combobox_populated_with_nuke_info_choices(dialog):
     """detailsType / stateType comboboxes pull NKSettings.INFO_CHOICES with
-    Nuke-specific keys like 'memory_usage' and 'viewer_info'."""
+    Nuke-specific keys like 'memory_usage' and 'viewer_info'. Spot-checks go by
+    key, not label — the labels carry a '(commercial)' suffix on the entries
+    that need a full license, and that wording is free to change."""
     cb = dialog._gui_widgets["detailsType"]
     items = [(cb.itemText(i), cb.itemData(i)) for i in range(cb.count())]
     assert items == nm.NKSettings.INFO_CHOICES
-    assert ("Memory usage", "memory_usage") in items
-    assert ("Viewer info", "viewer_info") in items
+    keys = [key for _label, key in items]
+    assert "memory_usage" in keys
+    assert "viewer_info" in keys
 
 
 def test_dialog_combobox_initial_value_from_initial_defaults(dialog):

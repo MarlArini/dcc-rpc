@@ -10,7 +10,7 @@ Pattern:
             current_graph=sd.make_graph(...),
             current_package=sd.make_package(...),
         )
-        ctx = SPContext.capture()
+        ctx = SDContext.capture()
         assert ctx.project_name() == ...
 """
 from __future__ import annotations

@@ -4,6 +4,15 @@ import re
 
 from .util_classes import RenderSettings, SessionInfo
 
+URL_REGEX = re.compile(
+    r"^https?://"  # http:// or https://
+    r"(?:[a-zA-Z0-9-]+\.)+"  # subdomain(s)
+    r"[a-zA-Z]{2,}"  # top-level domain
+    r"(?::\d{1,5})?"  # optional port
+    r"(?:/[^\s]*)?$",  # optional path
+    re.IGNORECASE,
+)
+
 
 def plural(count: int, prefix: str, postfix: str = "s") -> str:
     """Take a count of something and its word prefix and postfix, and
@@ -16,15 +25,7 @@ def plural(count: int, prefix: str, postfix: str = "s") -> str:
 
 def is_url(s: str) -> bool:
     """Evaluate a string and return True if it is a valid URL (may miss some edge cases)"""
-    regex = re.compile(
-        r"^https?://"  # http:// or https://
-        r"(?:[a-zA-Z0-9-]+\.)+"  # subdomain(s)
-        r"[a-zA-Z]{2,}"  # top-level domain
-        r"(?:\:\d{1,5})?"  # optional port
-        r"(?:/[^\s]*)?$",  # optional path
-        re.IGNORECASE,
-    )
-    return regex.match(s) is not None
+    return URL_REGEX.match(s) is not None
 
 
 def pad_text(s: str) -> str:
@@ -32,7 +33,6 @@ def pad_text(s: str) -> str:
     If the user string is more than one character, return it. Else,
     return a length-2 empty string to satisfy Discord's requirement.
     """
-    s = str(s)
     return s if len(s) > 1 else "  "
 
 
@@ -56,8 +56,8 @@ def get_file_size_str(b: float) -> str:
     Convert bytes to a readable string. Snippet taken
     directly from https://github.com/abrasic/blendpresence.
     """
-    for u in [" bytes", " KB", " MB", " GB", " TB"]:
-        if b < 1024.0 or u == " PB":
+    for u in ["bytes", "KB", "MB", "GB", "TB", "PB"]:
+        if b < 1024.0:
             break
         b /= 1024.0
     return f"{b:.2f} {u}"
@@ -80,13 +80,16 @@ def format_render_details(
     file_name: str | None = None,
     res: tuple[int, int] | None = None,
     rendered_frames: int | None = None,
-    prefs: RenderSettings = RenderSettings(),
+    prefs: RenderSettings | None = None,
 ) -> str:
     """Format rendering details string using a concat-join approach. Frame range
     is not included since most applications (Maya, Nuke) have multiple ways to
     execute a render and it is not possible to determine the frame range being
     rendered accurately."""
     parts = ["Rendering"]
+
+    if not prefs:
+        prefs = RenderSettings()
 
     if file_name and prefs.displayFileName:
         parts.append(file_name)

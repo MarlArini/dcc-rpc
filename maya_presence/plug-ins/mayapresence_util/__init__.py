@@ -69,9 +69,14 @@ from .timer import mp_cancel, mp_on_timer, mp_refresh_timer, mp_schedule
 
 # L6
 from .settings_menu import (
+    MP_MENU_PMC,
     MayaPresenceSettings,
+    _mp_add_settings_menu_item,
     mp_install_settings_menu,
     mp_on_setting_change,
     mp_show_settings_dialog,
     mp_uninstall_settings_menu,
 )
+# MP_SETTINGS_WINDOW is deliberately absent: mp_show_settings_dialog rebinds it
+# via `global`, so a copy imported here would go stale the moment a dialog
+# opens. Reach it as settings_menu.MP_SETTINGS_WINDOW.

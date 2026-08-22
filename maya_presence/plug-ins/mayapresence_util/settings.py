@@ -57,12 +57,11 @@ class MPSettings(SharedSettings, RenderSettings):
     )
 
     def __post_init__(self):
-        field_types = get_type_hints(MPSettings)
         for f in fields(self):
             ov = self._PREFIX + f.name
             if cmds.optionVar(exists=ov):
                 v = cmds.optionVar(query=ov)
-                f_type = field_types[f.name]
+                f_type = _FIELD_TYPES[f.name]
                 if f_type is bool:
                     v = bool(v)
                 object.__setattr__(self, f.name, v)
@@ -77,12 +76,10 @@ class MPSettings(SharedSettings, RenderSettings):
         # dataclass-generated __init__ runs field assignments BEFORE __post_init__)
         if name.startswith("_") or not getattr(self, "_loaded", False):
             return
-        declared = [f.name for f in fields(self)]
-        if name not in declared:
+        if name not in _FIELD_TYPES:
             return
         ov = self._PREFIX + name
-        field_types = get_type_hints(MPSettings)
-        kind = field_types[name]
+        kind = _FIELD_TYPES[name]
         if kind is bool or kind is int:
             cmds.optionVar(intValue=(ov, int(value)))
         elif kind is float:
@@ -95,3 +92,8 @@ class MPSettings(SharedSettings, RenderSettings):
         for f in fields(self):
             default = self._INITIAL_DEFAULTS.get(f.name, f.default)
             setattr(self, f.name, default)
+
+
+# {field name -> resolved type} for MPSettings' dataclass fields
+_TYPE_HINTS = get_type_hints(MPSettings)
+_FIELD_TYPES: Dict[str, Any] = {f.name: _TYPE_HINTS[f.name] for f in fields(MPSettings)}

@@ -457,10 +457,21 @@ def make_mask_parameters_view(dropzone_text: str = "Soft Brush") -> _FakeQWidget
     return _make_dropzone_view("QFrame", "MaskParametersView", dropzone_text)
 
 
-def make_material_mode_params(dropzone_text: str = "Worn Leather") -> _FakeQWidget:
+def make_material_mode_params(
+    dropzone_text: str = "Worn Leather", has_clear_button: bool = True,
+) -> _FakeQWidget:
     """A QWidget named 'materialModeParams' containing a 'dropzone_text' QLabel.
-    Used to test get_brush_material (the brush-tip material drop-zone)."""
-    return _make_dropzone_view("QWidget", "materialModeParams", dropzone_text)
+    Used to test get_brush_material (the brush-tip material drop-zone).
+
+    get_brush_material treats the presence of the 'clear' QToolButton as the
+    signal that a material is actually selected, so the factory includes one
+    by default; pass has_clear_button=False to model the unselected state."""
+    view = _make_dropzone_view("QWidget", "materialModeParams", dropzone_text)
+    if has_clear_button:
+        view._children.append(
+            _FakeQWidget(widget_class="QToolButton", object_name="clear")
+        )
+    return view
 
 
 def _get_main_window():
@@ -484,8 +495,17 @@ logging = SimpleNamespace(
 
 # sp.event
 class _Dispatcher:
-    def connect(self, *args, **kwargs):
-        pass
+    """Tracks (event, callback) connections so tests can assert that
+    close() disconnects everything start() connected."""
+
+    def __init__(self):
+        self.connections = []
+
+    def connect(self, event, callback):
+        self.connections.append((event, callback))
+
+    def disconnect(self, event, callback):
+        self.connections.remove((event, callback))
 
 
 event = SimpleNamespace(

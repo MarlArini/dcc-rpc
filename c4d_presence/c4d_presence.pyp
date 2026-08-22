@@ -210,10 +210,10 @@ _C4DP_CONST_DISPATCH = {  # id: (type, name, default)
     C4DP.C4DPRESENCE_RENDERSTATS: ("bool", "displayRenderStats", True),
     C4DP.C4DPRESENCE_RENDERFILE: ("bool", "displayFileName", True),
     C4DP.C4DPRESENCE_RENDERFRAME: ("bool", "displayFrames", True),
-    C4DP.C4DPRESENCE_B1ON: ("bool", "enableButton1", True),
+    C4DP.C4DPRESENCE_B1ON: ("bool", "enableButton1", False),
     C4DP.C4DPRESENCE_B1LABEL: ("str", "button1Label", ""),
     C4DP.C4DPRESENCE_B1URL: ("str", "button1Url", ""),
-    C4DP.C4DPRESENCE_B2ON: ("bool", "enableButton2", True),
+    C4DP.C4DPRESENCE_B2ON: ("bool", "enableButton2", False),
     C4DP.C4DPRESENCE_B2LABEL: ("str", "button2Label", ""),
     C4DP.C4DPRESENCE_B2URL: ("str", "button2Url", ""),
 }
@@ -280,10 +280,11 @@ class C4DPSettings(SharedSettings, RenderSettings):
 
 
 class C4DPSession(SessionInfo):
-    render_res: Tuple[int, int] = (0, 0)
-    render_engine: str = ""
-    rendering_doc: str = ""
-
+    def __init__(self):
+        super().__init__()
+        self.render_res: Tuple[int, int] = (0, 0)
+        self.render_engine: str = ""
+        self.rendering_doc: str = ""
 
 C4DP_PREFS = C4DPSettings()
 C4DP_SESSION = C4DPSession()
@@ -296,7 +297,6 @@ def _walk_objects(roots: List[c4d.BaseObject]):
     objs: List[c4d.BaseObject] = []
 
     def walk(obj: c4d.BaseObject):
-        nonlocal objs
         objs.append(obj)
         child = obj.GetDown()
         while child:
@@ -405,8 +405,7 @@ class C4DContext:
         year = ver_str[:4]
         major_release = ver_str[4]
         minor_release = ver_str[5:]
-        while minor_release.startswith("0"):
-            minor_release = minor_release[1:]
+        minor_release = minor_release.lstrip("0")
         if minor_release:
             return f"{year}.{major_release}.{minor_release}"
         else:
@@ -525,17 +524,18 @@ def c4d_update_presence():
         if C4DP_PREFS.detailsCycle or C4DP_PREFS.stateCycle:
             advance_cycle(C4DP_SESSION, C4DP_DISPLAY_TYPES)
         ctx = C4DContext.capture()
-        if ctx is None:
-            return
         c4d_update_large_icon(ctx)
         c4d_update_small_icon(ctx)
         c4d_update_presence_state(ctx)
         c4d_update_presence_details(ctx)
         update_buttons(C4DP_UPDATE_DETAILS, C4DP_PREFS)
         c4d_push_rpc_update()
-    elif C4DP_SESSION.connected:
+    elif C4DP_SESSION.connected and not C4DP_SESSION.cleared:
+        # Clear once on the transition to disabled, not on every tick.
+        # push_rpc_update flips `cleared` back off on the next successful push.
         try:
             C4DP_CLIENT.clear()
+            C4DP_SESSION.cleared = True
         except Exception as e:  # noqa: BLE001
             print(f"[C4DPresence] clear failed: {e}")
             C4DP_SESSION.connected = False
@@ -546,20 +546,28 @@ def c4d_update_presence():
 ####################
 
 
+# The *Type prefs are stored in the container as ints but held on C4DP_PREFS as
+# the string keys of C4DP_DISPATCH_TYPES. If the container ever holds an int
+# that isn't in _C4D_INFOTYPE_MAP, fall back to a *string* — falling back to the
+# dispatch table's declared default would leave an IntEnum on the prefs object,
+# and the display-type lookup would silently return nothing.
+_C4DP_INFOTYPE_FALLBACK = {
+    C4DP.C4DPRESENCE_DTYPE: "document",
+    C4DP.C4DPRESENCE_STYPE: "object",
+}
+
+
 def _write_pref(param_id, attr, t_data):
-    if param_id in (C4DP.C4DPRESENCE_DTYPE, C4DP.C4DPRESENCE_STYPE):
-        setattr(C4DP_PREFS, attr, _C4D_INFOTYPE_MAP.get(t_data, "document"))
+    fallback = _C4DP_INFOTYPE_FALLBACK.get(param_id)
+    if fallback is not None:
+        setattr(C4DP_PREFS, attr, _C4D_INFOTYPE_MAP.get(t_data, fallback))
     else:
         setattr(C4DP_PREFS, attr, t_data)
 
 
 def _sync_prefs(basecontainer):
-    for field_id, (kind, attr, default) in _C4DP_CONST_DISPATCH.items():
-        raw = _c4d_get(basecontainer, kind, field_id)
-        if field_id in (C4DP.C4DPRESENCE_DTYPE, C4DP.C4DPRESENCE_STYPE):
-            setattr(C4DP_PREFS, attr, _C4D_INFOTYPE_MAP.get(raw, default))
-        else:
-            setattr(C4DP_PREFS, attr, raw)
+    for field_id, (kind, attr, _default) in _C4DP_CONST_DISPATCH.items():
+        _write_pref(field_id, attr, _c4d_get(basecontainer, kind, field_id))
 
 
 def _reset_prefs(basecontainer):
@@ -684,14 +692,33 @@ class C4DPPresenceMessage(c4d.plugins.MessageData):
     messages; the render state of the application is polled for the same reason."""
 
     # pylint: disable=invalid-name, unused-argument, redefined-builtin
-    last_update: float = time.time()
-    seen_documents: Set[c4d.documents.BaseDocument] = set()
+    def __init__(self):
+        super().__init__()
+        self.last_update: float = time.time()
+        self.seen_documents: Set[c4d.documents.BaseDocument] = set()
 
     def GetTimer(self) -> int:
         return 1000
 
+    @staticmethod
+    def _open_documents() -> List[c4d.documents.BaseDocument] | None:
+        """Walk C4D's open-document list. Returns None rather than an empty
+        list if the walk yields nothing, so a query that comes back empty
+        never wipes the seen-document memo."""
+        docs: List[c4d.documents.BaseDocument] = []
+        doc = c4d.documents.GetFirstDocument()
+        while doc:
+            docs.append(doc)
+            doc = doc.GetNext()
+        return docs or None
+
     def CoreMessage(self, id: int, bc: c4d.BaseContainer) -> bool:
         if id == c4d.MSG_TIMER:
+            # Drop closed documents from the memo. Without this it grows for
+            # the life of the session and keeps every BaseDocument wrapper the
+            # user ever opened alive along with it.
+            if (open_docs := self._open_documents()) is not None:
+                self.seen_documents.intersection_update(open_docs)
             # Poll active document
             if (doc := c4d.documents.GetActiveDocument()) not in self.seen_documents:
                 self.seen_documents.add(doc)
@@ -745,3 +772,4 @@ if __name__ == "__main__":
     c4d.plugins.RegisterMessagePlugin(
         _C4D_CORE_PLUGIN_ID, str="C4DPresence Core", info=0, dat=C4DPPresenceMessage()
     )
+    c4d_connect_rpc()

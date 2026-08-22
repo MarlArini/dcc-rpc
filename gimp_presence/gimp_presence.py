@@ -8,7 +8,6 @@ GIMP 3.2.4. For more info, see https://github.com/MarlArini/dcc-rpc.
 import csv
 from dataclasses import dataclass, field, fields
 import json
-import os
 from pathlib import Path
 import platform
 import subprocess
@@ -39,14 +38,7 @@ from common import (  # noqa: E402
     advance_cycle
 )
 from colors import find_closest as gp_find_closest_color  # noqa: E402
-from settings_dialog import SETTINGS_PROC_NAME, build_settings_procedure, _gp_warn  # noqa: E402
-
-
-# Bootstrap: ensure this plugin's directory is on sys.path so the sibling
-# common.py and pypresence/ resolve when loaded by the host application.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+from settings_dialog import SETTINGS_PROC_NAME, build_settings_procedure, gp_warn  # noqa: E402
 
 _GP_PREFS_PATH = Path(Gimp.directory()) / "plug-in-settings" / "gimp_presence.json"
 
@@ -58,7 +50,7 @@ _GP_TIMER_ID: int | None = None
 
 class GPSession(SessionInfo):
     docname_was_doccount: bool = False
-    pinned_image: Gimp.Image | None = None
+    pinned_image: int | None = None
     temp_procedures_registered: bool = False
 
 
@@ -138,15 +130,15 @@ def gp_load_settings():
     if not path.exists():
         return
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with open(path, "r", encoding="utf-8") as settings_file:
+            data = json.load(settings_file)
         for f in fields(GPSettings):
             if f.name.startswith("_") or f.metadata.get("group") is None:
                 continue
             if f.name in data:
-                object.__setattr__(GP_PREFS, f.name, data[f.name])
+                setattr(GP_PREFS, f.name, data[f.name])
     except Exception as e:
-        _gp_warn(f"[GimpPresence] Failed to load settings: {e}")
+        gp_warn(f"[GimpPresence] Failed to load settings: {e}")
 
 
 GP_PREFS = GPSettings()
@@ -161,15 +153,22 @@ def _gp_platform_query_window() -> str | None:
     p = platform.system()
     if p == "Windows":
         try:
+            # Use Popen instead of read for faster response time / less delay
             procs = subprocess.Popen(
                 ["tasklist", "/V", "/FI", "IMAGENAME eq gimp-3.exe", "/FO", "CSV"],
                 stdout=subprocess.PIPE,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            s = procs.stdout
-            if s is None:
-                return
-            proc_list = s.read().decode("utf-8").replace("\r", "").split("\n")
+            try:
+                if procs.stdout is None:
+                    return None
+                proc_list = (
+                    procs.stdout.read().decode("utf-8").replace("\r", "").split("\n")
+                )
+            finally:
+                if procs.stdout is not None:
+                    procs.stdout.close()
+                procs.poll()
             reader = csv.DictReader(proc_list)
             gimp_process_info = next(reader)
             window_title = gimp_process_info["Window Title"]
@@ -234,14 +233,6 @@ def _gp_get_active_image() -> Gimp.Image | None:
             return images[0]
         else:
             return images[-1]
-
-
-def _gp_get_enum_name(enumerated_value) -> str:
-    """Helper to convert a value from an enum class into the string
-    label associated with it"""
-    m = type(enumerated_value)._member_map_  # pylint: disable=protected-access
-    m_inv = {v: k for k, v in m.items()}
-    return m_inv[enumerated_value]
 
 
 @dataclass
@@ -338,8 +329,7 @@ class GPContext:
             return f"{gp_plural(len(layers), 'layer')} selected"
         else:
             layer_name = layers[0].get_name()
-            layer_blend_mode = layers[0].get_mode()
-            layer_blend_mode_name = _gp_get_enum_name(layer_blend_mode).title()
+            layer_blend_mode_name = layers[0].get_mode().name.title()
             blend_mode_str = (
                 f" ({layer_blend_mode_name})"
                 if layer_blend_mode_name != "Normal"
@@ -366,7 +356,7 @@ class GPContext:
         if self.active_image is None:
             return None
         model = self.active_image.get_base_type()
-        return _gp_get_enum_name(model)
+        return model.name
 
     def _color_profile(self) -> str | None:
         if self.active_image is None:
@@ -382,7 +372,7 @@ class GPContext:
         if model is None or profile is None:
             if GP_PREFS.useAlternates and self.images:
                 models = set(
-                    [_gp_get_enum_name(i.get_base_type()) for i in self.images]
+                    [i.get_base_type().name for i in self.images]
                 )
                 profiles = set(
                     [i.get_effective_color_profile().get_label() for i in self.images]
@@ -448,13 +438,13 @@ class GPContext:
             else:
                 return f"Largest open image: {dims[0]}x{dims[1]} @ {res[0]}ppi x, {res[1]}ppi y"
 
-    def foreground_color(self) -> Tuple[int, int, int] | None:
+    def foreground_color(self) -> Tuple[int, int, int]:
         fg = Gimp.context_get_foreground()
         rgba = fg.get_rgba()
         return (rgba[0], rgba[1], rgba[2])
 
     def view_blend_mode(self) -> str:
-        return f"Paint mode: {_gp_get_enum_name(Gimp.context_get_paint_mode()).title()}"
+        return f"Paint mode: {Gimp.context_get_paint_mode().name.title()}"
 
 
 GP_DISPLAY_TYPES: Dict[str, Callable] = {
@@ -492,16 +482,19 @@ def gp_update_large_icon(ctx: GPContext):
 
 
 def gp_push_rpc_update():
-    push_rpc_update(GP_SESSION, GP_DETAILS, GP_PREFS, GP_RPC_CLIENT, "gimp", _gp_warn)
+    push_rpc_update(GP_SESSION, GP_DETAILS, GP_PREFS, GP_RPC_CLIENT, "gimp", gp_warn)
 
 
 def gp_update_presence():
     if not GP_PREFS.generalEnable:
-        if GP_SESSION.connected:
+        # Clear once on the transition to disabled, not on every tick.
+        # push_rpc_update flips `cleared` back off on the next successful push.
+        if GP_SESSION.connected and not GP_SESSION.cleared:
             try:
                 GP_RPC_CLIENT.clear()
+                GP_SESSION.cleared = True
             except Exception as e:  # noqa: BLE001
-                _gp_warn(f"[GimpPresence] clear failed: {e}")
+                gp_warn(f"[GimpPresence] clear failed: {e}")
                 GP_SESSION.connected = False
         return
     ctx = GPContext.capture()
@@ -528,7 +521,7 @@ def gp_update_presence():
 _GP_PIN_DOC = (
     "Pin the currently active image",
     "Override active image detection and display statistics for the current"
-    + "image until it is closed or unpinned.",
+    + " image until it is closed or unpinned.",
 )
 
 _GP_UNPIN_DOC = (
@@ -581,23 +574,24 @@ def gp_run(procedure, config, data):  # pylint: disable=unused-argument
     global _GP_MAIN_LOOP
     plugin = procedure.get_plug_in()
     if not GP_SESSION.connected:
-        GP_SESSION.connected = connect_rpc(GP_RPC_CLIENT, "gimp", _gp_warn)
+        GP_SESSION.connected = connect_rpc(GP_RPC_CLIENT, "gimp", gp_warn)
     gp_load_settings()
     gp_register_temp_procedures(plugin)
     gp_start_timer()
     procedure.persistent_ready()
     plugin.persistent_enable()
     _GP_MAIN_LOOP = GLib.MainLoop()
-    if _GP_MAIN_LOOP is None:
-        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR)
     try:
         _GP_MAIN_LOOP.run()
     finally:
         gp_stop_timer()
         gp_unregister_temp_procedures(plugin)
         if GP_SESSION.connected:
-            GP_RPC_CLIENT.clear()
-            GP_RPC_CLIENT.close()
+            try:
+                GP_RPC_CLIENT.clear()
+                GP_RPC_CLIENT.close()
+            except Exception as _:
+                pass
         _GP_MAIN_LOOP = None
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
@@ -620,7 +614,7 @@ def gp_tick():
     try:
         gp_update_presence()
     except Exception as e:
-        _gp_warn(f"[GimpPresence] update failed: {e}")
+        gp_warn(f"[GimpPresence] update failed: {e}")
     return True
 
 
@@ -643,7 +637,7 @@ class GPPlugin(Gimp.PlugIn):
             procedure.set_menu_label("GimpPresence Client (Background)")
             procedure.set_documentation(
                 "GimpPresence background process."
-                + "Runs continuously and sends updates to Discord."
+                + " Runs continuously and sends updates to Discord."
             )
         else:
             procedure = None

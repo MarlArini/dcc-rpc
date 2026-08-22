@@ -65,7 +65,7 @@ class KPSettings(SharedSettings, ColoredIconSettings):
         if instance is None:
             qc.qWarning("[KritaPresence] Unable to load user settings (using defaults)")
             return
-        field_types = get_type_hints(KPSettings)
+        field_types = _KP_FIELD_TYPES
         for f in fields(self):
             if v := instance.readSetting(self._PREFIX, f.name, ""):
                 f_type = field_types[f.name]
@@ -81,8 +81,7 @@ class KPSettings(SharedSettings, ColoredIconSettings):
         object.__setattr__(self, name, value)
         if name.startswith("_") or not self._loaded:
             return
-        declared = {f.name: f.type for f in fields(self)}
-        if name not in declared:
+        if name not in _KP_FIELD_TYPES:
             return
         instance = kr.Krita.instance()
         if instance is None:
@@ -94,6 +93,14 @@ class KPSettings(SharedSettings, ColoredIconSettings):
         for f in fields(self):
             default = self._INITIAL_DEFAULTS.get(f.name, f.default)
             setattr(self, f.name, default)
+
+
+# {field name -> resolved type} for KPSettings' dataclass fields. Both are
+# static, and __setattr__ runs on every pref write, so resolve them once here
+# rather than per call. Declared after the class so get_type_hints can see it.
+_KP_FIELD_TYPES: Dict[str, Any] = {
+    f.name: get_type_hints(KPSettings)[f.name] for f in fields(KPSettings)
+}
 
 
 KP_TOOL_MAPPING = {
@@ -304,9 +311,8 @@ class KPContext:
 
     def tool_info(self) -> str | None:
         name = self.active_tool_name()
-        if name is None:
+        if name is None or not (tool_name := KP_TOOL_MAPPING.get(name, None)):
             return None
-        tool_name = KP_TOOL_MAPPING.get(name, None)
         tool_blend_mode = self.view_blend_mode()
         if tool_blend_mode.lower() != "normal":
             return f"Using {tool_name} ({tool_blend_mode})"
@@ -352,7 +358,6 @@ class KPPlugin(RPCBasePlugin):
         root_node = doc.rootNode()
         return root_node.uniqueId().toString()
 
-
     @staticmethod
     def doc_time():
         """Check the internal document-time map for how long a document was open
@@ -364,7 +369,11 @@ class KPPlugin(RPCBasePlugin):
         if t is None:
             return None
         t_conv = (t // 3600, (t % 3600) // 60)
-        t_formatted = f"{t_conv[0]}h {t_conv[1]}m" if t_conv[0] else kp_plural(t_conv[1], 'minute')
+        t_formatted = (
+            f"{t_conv[0]}h {t_conv[1]}m"
+            if t_conv[0]
+            else kp_plural(t_conv[1], "minute")
+        )
         if KPPlugin.idle_monitor.is_idle():
             return f"Document time: {t_formatted} (Idle)"
         return f"Document time: {t_formatted}"
@@ -377,6 +386,7 @@ class KPPlugin(RPCBasePlugin):
             warn=qc.qWarning,
             error=qc.qCritical,
         )
+        self._last_accrual = time.time()
 
     def start(self):
         self.session.connected = self._connect_rpc()
@@ -445,14 +455,22 @@ class KPPlugin(RPCBasePlugin):
             self.details.large_icon_text = "Krita"
 
     def update_presence(self):
-        doc_id = KPPlugin.doc_id()
-        if doc_id and not self.idle_monitor.is_idle():
-            if doc_id in self.doc_times:
-                self.doc_times[doc_id] += self.prefs.generalUpdate
-            else:
-                self.doc_times[doc_id] = self.prefs.generalUpdate
+        # Accrue real elapsed seconds rather than assuming one generalUpdate
+        # interval per call: on_settings_change also routes through here, so
+        # counting a full interval each time inflated the document timer every
+        # time the user touched the settings dialog. The sub-second remainder
+        # stays on the clock, and idle time advances the clock without being
+        # counted, so it is discarded rather than banked.
+        now = time.time()
+        whole_seconds = int(now - self._last_accrual)
+        if whole_seconds > 0:
+            self._last_accrual += whole_seconds
+            doc_id = KPPlugin.doc_id()
+            if doc_id and not self.idle_monitor.is_idle():
+                self.doc_times[doc_id] = (
+                    self.doc_times.get(doc_id, 0) + whole_seconds
+                )
         return super().update_presence()
-
 
 
 class KPExtension(kr.Extension):

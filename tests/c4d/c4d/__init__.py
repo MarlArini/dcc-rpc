@@ -143,6 +143,10 @@ MSG_DOCUMENTINFO_TYPE_LOAD = 10
 MSG_DOCUMENTINFO_TYPE_NEWPROJECT_AFTER = 11
 MSG_TIMER = 1003
 
+# CheckIsRunning() modes — the plugin polls these to detect render start/stop.
+CHECKISRUNNING_EDITORRENDERING = 0
+CHECKISRUNNING_EXTERNALRENDERING = 1
+
 
 # ===========================================================================
 # BaseContainer — used as world container + GetMachineFeatures result.
@@ -327,6 +331,16 @@ class _State:
     # documents.GetActiveDocument()
     active_doc: Optional["BaseDocument"] = None
 
+    # documents.GetFirstDocument() + BaseDocument.GetNext() — C4D exposes the
+    # open documents as a linked list; the fake backs it with an ordered list.
+    # Left empty by default so tests that only set `active_doc` see an empty
+    # walk (the plugin treats that as "don't know" and skips pruning).
+    open_docs: List["BaseDocument"] = field(default_factory=list)
+
+    # CheckIsRunning(CHECKISRUNNING_EDITORRENDERING / _EXTERNALRENDERING)
+    editor_rendering: bool = False
+    external_rendering: bool = False
+
     # GetMachineFeatures() — a BaseContainer; tests can set
     # bc[DRAWPORT_RENDERER_NAME] = "NVIDIA RTX 4090" then assign here.
     machine_features: Optional[BaseContainer] = None
@@ -392,6 +406,16 @@ def GetWorldContainerInstance() -> Optional[BaseContainer]:  # noqa: N802
 
 def WriteConsole(msg: str) -> None:  # noqa: N802
     _state.console_lines.append(str(msg))
+
+
+def CheckIsRunning(mode: int) -> bool:  # noqa: N802
+    """Editor / external render state. Tests drive it with
+    set_state(editor_rendering=True) or set_state(external_rendering=True)."""
+    if mode == CHECKISRUNNING_EDITORRENDERING:
+        return _state.editor_rendering
+    if mode == CHECKISRUNNING_EXTERNALRENDERING:
+        return _state.external_rendering
+    return False
 
 
 # ===========================================================================
@@ -481,6 +505,14 @@ class BaseDocument:
         self._active_object: Optional[BaseObject] = None
         self._fps: int = 30
         self._mode: int = Mmodel
+
+    def GetNext(self) -> Optional["BaseDocument"]:  # noqa: N802
+        """Next document in the open-document list, or None at the end."""
+        docs = get_state().open_docs
+        try:
+            return docs[docs.index(self) + 1]
+        except (ValueError, IndexError):
+            return None
 
     def GetDocumentName(self) -> str:  # noqa: N802
         return self._name

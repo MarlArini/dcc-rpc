@@ -1,7 +1,7 @@
 """
-Tests for SPContext (Designer plugin).
+Tests for SDContext (Designer plugin).
 
-Designer's SPPlugin is class-based and instantiated at module load — the
+Designer's SDPlugin is class-based and instantiated at module load — the
 fake's `sd.getContext()` etc. all return cooperating objects so import is
 non-destructive.
 
@@ -17,10 +17,10 @@ xfail(strict=True) so they pass-when-fixed:
 from __future__ import annotations
 import pytest
 
-# Important: import the plugin once at module top. This triggers SPPlugin
+# Important: import the plugin once at module top. This triggers SDPlugin
 # instantiation which reaches into `sd.getContext().getSDApplication()...`
 # — all of which the fake satisfies.
-from designerpresence import SPContext, SP_PLUGIN  # noqa: F401
+from designerpresence import SDContext, SD_PLUGIN  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -29,20 +29,20 @@ from designerpresence import SPContext, SP_PLUGIN  # noqa: F401
 
 def test_capture_returns_none_when_no_graph(sd):
     sd.set_state(current_graph=None)
-    assert SPContext.capture() is None
+    assert SDContext.capture() is None
 
 
 def test_capture_returns_none_when_graph_has_no_package(sd):
     g = sd.make_graph(package=None)
     sd.set_state(current_graph=g)
-    assert SPContext.capture() is None
+    assert SDContext.capture() is None
 
 
 def test_capture_returns_context_with_graph_and_package(sd):
     pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx is not None
     assert ctx.graph is g
     assert ctx.package is pkg
@@ -56,7 +56,7 @@ def test_package_name_from_path(sd):
     pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.package_name() == "Fabrics.sbs"
 
 
@@ -64,7 +64,7 @@ def test_package_name_empty_path_calls_it_unsaved(sd):
     pkg = sd.make_package(file_path="")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     out = ctx.package_name()
     assert "No package open" not in out
     assert "unsaved" in out.lower() or "untitled" in out.lower()
@@ -77,7 +77,7 @@ def test_graph_name_from_annotation(sd):
         annotations={"identifier": sd.make_value_string("Wool")},
     )
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.graph_name() == "Graph: Wool"
 
 
@@ -88,14 +88,14 @@ def test_graph_name_missing_annotation_returns_unsaved_string(sd):
     pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
     g = sd.make_graph(package=pkg, annotations={})
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.graph_name() == "Unsaved graph"
 
 
 def test_graph_name_replaces_underscores_when_pref_set(sd):
-    """SPSettings.replaceUnderscores=True swaps _ for space in the displayed
+    """SDSettings.replaceUnderscores=True swaps _ for space in the displayed
     name. Pins the on-by-default behavior."""
-    SP_PLUGIN.prefs.replaceUnderscores = True
+    SD_PLUGIN.prefs.replaceUnderscores = True
     try:
         pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
         g = sd.make_graph(
@@ -103,14 +103,14 @@ def test_graph_name_replaces_underscores_when_pref_set(sd):
             annotations={"identifier": sd.make_value_string("worn_wool_v2")},
         )
         sd.set_state(current_graph=g)
-        ctx = SPContext.capture()
+        ctx = SDContext.capture()
         assert ctx.graph_name() == "Graph: worn wool v2"
     finally:
-        SP_PLUGIN.prefs.replaceUnderscores = True  # field default
+        SD_PLUGIN.prefs.replaceUnderscores = True  # field default
 
 
 def test_graph_name_preserves_underscores_when_pref_unset(sd):
-    SP_PLUGIN.prefs.replaceUnderscores = False
+    SD_PLUGIN.prefs.replaceUnderscores = False
     try:
         pkg = sd.make_package(file_path="/projects/Fabrics.sbs")
         g = sd.make_graph(
@@ -118,10 +118,10 @@ def test_graph_name_preserves_underscores_when_pref_unset(sd):
             annotations={"identifier": sd.make_value_string("worn_wool_v2")},
         )
         sd.set_state(current_graph=g)
-        ctx = SPContext.capture()
+        ctx = SDContext.capture()
         assert ctx.graph_name() == "Graph: worn_wool_v2"
     finally:
-        SP_PLUGIN.prefs.replaceUnderscores = True
+        SD_PLUGIN.prefs.replaceUnderscores = True
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ def test_node_name_returns_none_when_no_selection(sd):
     pkg = sd.make_package(file_path="/a.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g, selected_nodes=None)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.node_name() is None
 
 
@@ -141,7 +141,7 @@ def test_node_name_returns_none_when_multi_selection(sd):
     g = sd.make_graph(package=pkg)
     sel = sd.make_array(items=[sd.make_node("Blend"), sd.make_node("Blur")])
     sd.set_state(current_graph=g, selected_nodes=sel)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.node_name() is None
 
 
@@ -150,7 +150,7 @@ def test_node_name_returns_label_when_single_selection(sd):
     g = sd.make_graph(package=pkg)
     sel = sd.make_array(items=[sd.make_node("Uniform color")])
     sd.set_state(current_graph=g, selected_nodes=sel)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.node_name() == "Uniform color"
 
 
@@ -167,7 +167,7 @@ def test_num_nodes(sd, n, expected):
     pkg = sd.make_package(file_path="/a.sbs")
     g = sd.make_graph(package=pkg, nodes=[sd.make_node() for _ in range(n)])
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.num_nodes() == expected
 
 
@@ -180,7 +180,7 @@ def test_num_output_nodes(sd, n, expected):
     pkg = sd.make_package(file_path="/a.sbs")
     g = sd.make_graph(package=pkg, output_nodes=[sd.make_node() for _ in range(n)])
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.num_output_nodes() == expected
 
 
@@ -195,7 +195,7 @@ def test_resource_count_excludes_subgraphs_and_folders(sd):
     ])
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     # 2 bitmaps + 1 light = 3 countable resources
     assert ctx.resource_count() == "3 resources"
 
@@ -208,7 +208,7 @@ def test_parent_size_none_for_non_comp_graph(sd):
     pkg = sd.make_package(file_path="/a.sbs")
     g = sd.make_graph(package=pkg, is_comp_graph=False)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.parent_size() is None
 
 
@@ -218,7 +218,7 @@ def test_parent_size_for_comp_graph(sd):
         package=pkg, is_comp_graph=True, default_parent_size=sd.make_int2(1024, 1024)
     )
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.parent_size() == (1024, 1024)
 
 
@@ -232,7 +232,7 @@ def test_output_resolution_default(sd):
         input_properties={"$outputsize": sd.make_value_int2(0, 0)},
     )
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     # 2048 * 2^0 = 2048
     assert ctx.output_resolution() == "Export resolution: 2048x2048"
 
@@ -246,7 +246,7 @@ def test_output_resolution_scaled(sd):
         input_properties={"$outputsize": sd.make_value_int2(1, 2)},
     )
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     # 1024 * 2^1 = 2048; 1024 * 2^2 = 4096
     assert ctx.output_resolution() == "Export resolution: 2048x4096"
 
@@ -257,7 +257,7 @@ def test_output_resolution_none_when_property_missing(sd):
         package=pkg, is_comp_graph=True, input_properties={},  # no $outputsize
     )
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.output_resolution() is None
 
 
@@ -271,7 +271,7 @@ def test_material_model_returns_formatted(sd):
         package=pkg, annotations={"material_model": sd.make_value_string("OpenPBR v1.1")}
     )
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.material_model() == "Material model: OpenPBR v1.1"
 
 
@@ -281,7 +281,7 @@ def test_material_model_undefined_returns_none(sd):
         package=pkg, annotations={"material_model": sd.make_value_string("Undefined")}
     )
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.material_model() is None
 
 
@@ -289,7 +289,7 @@ def test_material_model_missing_annotation_returns_none(sd):
     pkg = sd.make_package(file_path="/a.sbs")
     g = sd.make_graph(package=pkg, annotations={})
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.material_model() is None
 
 
@@ -298,7 +298,7 @@ def test_color_space_returns_formatted(sd):
     pkg = sd.make_package(file_path="/a.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.color_space() == "Color space: ACES"
 
 
@@ -307,46 +307,46 @@ def test_color_space_none_when_engine_unavailable(sd):
     pkg = sd.make_package(file_path="/a.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.color_space() is None
 
 
 # ---------------------------------------------------------------------------
-# SPPlugin: update_small_icon / update_large_icon / on_file_open
+# SDPlugin: update_small_icon / update_large_icon / on_file_open
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def designer_plugin_clean():
-    """Snapshot/restore SP_PLUGIN.prefs and details fields between tests."""
+    """Snapshot/restore SD_PLUGIN.prefs and details fields between tests."""
     snap = (
-        SP_PLUGIN.prefs.displaySmallIcon,
-        SP_PLUGIN.prefs.displayVersion,
-        SP_PLUGIN.prefs.resetTimer,
-        SP_PLUGIN.session.start_time,
-        SP_PLUGIN.details.small_icon,
-        SP_PLUGIN.details.small_icon_text,
-        SP_PLUGIN.details.large_icon_text,
+        SD_PLUGIN.prefs.displaySmallIcon,
+        SD_PLUGIN.prefs.displayVersion,
+        SD_PLUGIN.prefs.resetTimer,
+        SD_PLUGIN.session.start_time,
+        SD_PLUGIN.details.small_icon,
+        SD_PLUGIN.details.small_icon_text,
+        SD_PLUGIN.details.large_icon_text,
     )
-    yield SP_PLUGIN
-    (SP_PLUGIN.prefs.displaySmallIcon,
-     SP_PLUGIN.prefs.displayVersion,
-     SP_PLUGIN.prefs.resetTimer,
-     SP_PLUGIN.session.start_time,
-     SP_PLUGIN.details.small_icon,
-     SP_PLUGIN.details.small_icon_text,
-     SP_PLUGIN.details.large_icon_text) = snap
+    yield SD_PLUGIN
+    (SD_PLUGIN.prefs.displaySmallIcon,
+     SD_PLUGIN.prefs.displayVersion,
+     SD_PLUGIN.prefs.resetTimer,
+     SD_PLUGIN.session.start_time,
+     SD_PLUGIN.details.small_icon,
+     SD_PLUGIN.details.small_icon_text,
+     SD_PLUGIN.details.large_icon_text) = snap
 
 
 def _designer_ctx_with_selected_node(sd, label):
-    """Helper: build an SPContext whose selected node has the given definition label."""
+    """Helper: build an SDContext whose selected node has the given definition label."""
     pkg = sd.make_package(file_path="/p.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(
         current_graph=g,
         selected_nodes=sd.make_array(items=[sd.make_node(label)]),
     )
-    return SPContext.capture()
+    return SDContext.capture()
 
 
 def test_update_small_icon_disabled_pref(sd, designer_plugin_clean):
@@ -363,7 +363,7 @@ def test_update_small_icon_no_selection_clears(sd, designer_plugin_clean):
     pkg = sd.make_package(file_path="/p.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g, selected_nodes=None)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     designer_plugin_clean.update_small_icon(ctx)
     assert designer_plugin_clean.details.small_icon is None
     assert designer_plugin_clean.details.small_icon_text == ""
@@ -400,7 +400,7 @@ def test_update_large_icon_with_version(sd, designer_plugin_clean):
     pkg = sd.make_package(file_path="/p.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     designer_plugin_clean.update_large_icon(ctx)
     assert "16.0.1" in designer_plugin_clean.details.large_icon_text
     assert "Adobe Substance 3D Designer" in designer_plugin_clean.details.large_icon_text
@@ -411,7 +411,7 @@ def test_update_large_icon_without_version(sd, designer_plugin_clean):
     pkg = sd.make_package(file_path="/p.sbs")
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     designer_plugin_clean.update_large_icon(ctx)
     assert designer_plugin_clean.details.large_icon_text == "Adobe Substance 3D Designer"
 
@@ -435,10 +435,10 @@ def test_on_file_open_preserves_timer_when_pref_unset(sd, designer_plugin_clean)
 # ---------------------------------------------------------------------------
 
 def test_capture_returns_none_when_uimgr_is_none(monkeypatch):
-    """If the global SP_PLUGIN's uimgr happens to be None at capture time,
+    """If the global SD_PLUGIN's uimgr happens to be None at capture time,
     return None. We monkeypatch the plugin's uimgr to simulate that."""
-    monkeypatch.setattr(SP_PLUGIN, "uimgr", None)
-    assert SPContext.capture() is None
+    monkeypatch.setattr(SD_PLUGIN, "uimgr", None)
+    assert SDContext.capture() is None
 
 def test_node_name_returns_none_when_definition_is_none(sd):
     """A single-selected node whose getDefinition() returns None should make
@@ -450,7 +450,7 @@ def test_node_name_returns_none_when_definition_is_none(sd):
     node_with_no_def = _Node(_definition=None)
     sd.set_state(current_graph=g,
                  selected_nodes=sd.make_array(items=[node_with_no_def]))
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.node_name() is None
 
 
@@ -460,5 +460,5 @@ def test_output_resolution_none_when_parent_size_none(sd):
     pkg = sd.make_package(file_path="/p.sbs")
     g = sd.make_graph(package=pkg, is_comp_graph=False)
     sd.set_state(current_graph=g)
-    ctx = SPContext.capture()
+    ctx = SDContext.capture()
     assert ctx.output_resolution() is None

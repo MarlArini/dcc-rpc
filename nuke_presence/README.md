@@ -27,3 +27,6 @@ If you enable rendering details, when you are rendering a comp it will override 
 
 #### Icons
 If you enable small icons and you are a commercial user, the plugin will try to display an icon for the node you currently have selected. Not all nodes will be displayed, as only a subset of the nodes were available as SVGs which could be rendered to the size required by Discord. A tooltip will also be added showing the class of the node (e.g., 'Viewer') and the name of the node (e.g., 'Viewer1').
+
+#### Timer Reset
+Nuke has a callback for loading scripts, but not for new script creation; thus, if you enable resetting the timer when the script changes, this will only take effect when you load an existing script, not when you create a new one.
