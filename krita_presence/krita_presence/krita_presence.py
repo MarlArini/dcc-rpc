@@ -1,6 +1,6 @@
 """
 KritaPresence is a Discord Rich Presence client plugin for Krita, tested on
-Krita 5.3.1 (git 9069dbc). For more info, see https://github.com/MarlArini/dcc-rpc.
+Krita 5.3.3 (git 858d352). For more info, see https://github.com/MarlArini/dcc-rpc.
 """
 
 from dataclasses import dataclass, fields
@@ -272,7 +272,7 @@ class KPContext:
             preset = preset[2:]
         preset = preset.replace("(mypaint)_prev", "")
         preset = preset.replace("(mypaint)", " ").strip()
-        return f"Preset: {preset}"
+        return f"Brush Preset: {preset}"
 
     def _color_model(self) -> str:
         return cast(kr.Document, self.doc).colorModel()
