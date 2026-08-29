@@ -23,7 +23,7 @@ State is reset between tests by the autouse fixture in conftest.py.
 from __future__ import annotations
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any, Callable, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +246,8 @@ class _FakeQAction:
 
 
 class _FakeQColor:
-    def __init__(self, r: int = 0, g: int = 0, b: int = 0):
-        self._r, self._g, self._b = r, g, b
+    def __init__(self, r: int = 0, g: int = 0, b: int = 0, a: int = 255):
+        self._r, self._g, self._b, self._a = r, g, b, a
 
     def red(self) -> int:
         return self._r
@@ -258,13 +258,28 @@ class _FakeQColor:
     def blue(self) -> int:
         return self._b
 
+    def alpha(self) -> int:
+        return self._a
+
+    def getRgb(self) -> tuple:  # noqa: N802
+        """Qt returns a 4-tuple (r, g, b, a), not a triple.
+        sample_brush_material_color zips three of these together and indexes
+        the first three sums, so the alpha element has to be present for the
+        fake to match what the real call produces."""
+        return (self._r, self._g, self._b, self._a)
+
 
 class _FakeQImage:
-    def __init__(self, color: tuple):
+    def __init__(self, color: tuple, pixels: Optional[Dict[tuple, tuple]] = None):
         self._color = color
+        self._pixels = dict(pixels) if pixels else {}
 
     def pixelColor(self, x: int, y: int) -> _FakeQColor:  # noqa: N802
-        return _FakeQColor(*self._color)
+        """Uniform `color` unless the test pinned a specific (x, y). The
+        per-pixel map exists so sample_brush_material_color's three-point
+        average can be exercised with three *different* colors — a flat image
+        would make the averaging step untestable."""
+        return _FakeQColor(*self._pixels.get((x, y), self._color))
 
 
 class _FakeQSize:
@@ -279,15 +294,21 @@ class _FakeQSize:
 
 
 class _FakeQPixmap:
-    def __init__(self, color: tuple, size: tuple = (10, 10)):
+    def __init__(
+        self,
+        color: tuple,
+        size: tuple = (10, 10),
+        pixels: Optional[Dict[tuple, tuple]] = None,
+    ):
         self._color = color
         self._size = size
+        self._pixels = pixels
 
     def size(self) -> _FakeQSize:
         return _FakeQSize(*self._size)
 
     def toImage(self) -> _FakeQImage:  # noqa: N802
-        return _FakeQImage(self._color)
+        return _FakeQImage(self._color, self._pixels)
 
 
 class _FakeQWidget:
@@ -298,7 +319,13 @@ class _FakeQWidget:
     `object_name`. findChild/findChildren walk all descendants depth-first
     and filter on both. Pass `raise_on_find=True` to simulate a torn-down
     widget that raises RuntimeError from Qt — useful for testing the
-    exception branches in painter_presence._find_named / get_active_tool.
+    exception branches in painter_presence._find_named_visible /
+    get_active_tool.
+
+    `visible=False` models a widget that is in the tree but not on screen.
+    Painter keeps parameter panels and their controls parented while hiding
+    the inactive ones, which is why the plugin selects on isVisible() rather
+    than taking findChild's first match.
     """
 
     def __init__(
@@ -310,6 +337,8 @@ class _FakeQWidget:
         checked: bool = False,
         default_action: Optional[_FakeQAction] = None,
         paint_color: Optional[tuple] = None,
+        pixels: Optional[Dict[tuple, tuple]] = None,
+        visible: bool = True,
         raise_on_find: bool = False,
     ):
         self._widget_class = widget_class
@@ -319,6 +348,8 @@ class _FakeQWidget:
         self._checked = checked
         self._default_action = default_action
         self._paint_color = paint_color
+        self._pixels = pixels
+        self._visible = visible
         self._raise_on_find = raise_on_find
 
     # --- tree traversal ------------------------------------------------
@@ -348,6 +379,9 @@ class _FakeQWidget:
             and (name is None or c._object_name == name)
         ]
 
+    def isVisible(self):  # noqa: N802
+        return self._visible
+
     # --- per-widget surface --------------------------------------------
 
     def objectName(self) -> str:  # noqa: N802
@@ -363,7 +397,7 @@ class _FakeQWidget:
         return self._default_action
 
     def grab(self) -> _FakeQPixmap:
-        return _FakeQPixmap(self._paint_color or (0, 0, 0))
+        return _FakeQPixmap(self._paint_color or (0, 0, 0), pixels=self._pixels)
 
 
 # Public constructors used in tests.
@@ -458,19 +492,39 @@ def make_mask_parameters_view(dropzone_text: str = "Soft Brush") -> _FakeQWidget
 
 
 def make_material_mode_params(
-    dropzone_text: str = "Worn Leather", has_clear_button: bool = True,
+    dropzone_text: str = "Worn Leather",
+    material_selected: bool = True,
+    preview_color: Optional[tuple] = (120, 90, 60),
+    preview_pixels: Optional[Dict[tuple, tuple]] = None,
 ) -> _FakeQWidget:
-    """A QWidget named 'materialModeParams' containing a 'dropzone_text' QLabel.
-    Used to test get_brush_material (the brush-tip material drop-zone).
+    """A QWidget named 'materialModeParams' holding the brush-tip drop-zone:
+    a 'dropzone_text' QLabel, a 'dropzone_icon' QLabel carrying the material
+    preview thumbnail, and the 'clear' QToolButton.
 
-    get_brush_material treats the presence of the 'clear' QToolButton as the
-    signal that a material is actually selected, so the factory includes one
-    by default; pass has_clear_button=False to model the unselected state."""
+    The 'clear' button is ALWAYS present, because that is what real Painter
+    does — it stays in the widget tree whether or not a material is assigned.
+    What changes is its visibility, which is why get_brush_material selects on
+    isVisible() rather than on the button merely existing. `material_selected`
+    drives that visibility; pass False to model the no-material state.
+
+    `preview_color` paints the whole thumbnail one color. `preview_pixels` maps
+    (x, y) -> color for the specific points sample_brush_material_color reads,
+    so its three-point average can be checked against three different colors.
+    Pass `preview_color=None` with no `preview_pixels` to drop the thumbnail
+    entirely and model the case where there is nothing to sample."""
     view = _make_dropzone_view("QWidget", "materialModeParams", dropzone_text)
-    if has_clear_button:
-        view._children.append(
-            _FakeQWidget(widget_class="QToolButton", object_name="clear")
-        )
+    if preview_color is not None or preview_pixels:
+        view._children.append(_FakeQWidget(
+            widget_class="QLabel",
+            object_name="dropzone_icon",
+            paint_color=preview_color,
+            pixels=preview_pixels,
+        ))
+    view._children.append(_FakeQWidget(
+        widget_class="QToolButton",
+        object_name="clear",
+        visible=material_selected,
+    ))
     return view
 
 

@@ -335,14 +335,16 @@ class SPContext:
     # Below here, methods rely on querying the Qt UI (no API routes) #
     ##################################################################
 
-    def _find_named(self, parent, cls, name):
+    def _find_named_visible(self, parent, cls, name):
         """Helper to find a child of the parent QtWidget matching
         the provided class and name, catching the exception if
         the parent widget has been destroyed and returning None"""
         try:
             if parent is None:
                 return None
-            return parent.findChild(cls, name)
+            return next(
+                filter(lambda x: x.isVisible(), parent.findChildren(cls, name)), None
+            )
         except RuntimeError:
             return None
 
@@ -351,7 +353,9 @@ class SPContext:
         (always English, used for mapping to icon names) and the name of the tool (localized,
         used as the small icon text)"""
         try:
-            toolbar = self._find_named(self.main_window, QtW.QToolBar, "tools_toolbar")
+            toolbar = self._find_named_visible(
+                self.main_window, QtW.QToolBar, "tools_toolbar"
+            )
             if toolbar is None:
                 return None
             checked_items = [
@@ -383,7 +387,8 @@ class SPContext:
                 (
                     x
                     for x in source_parameter_views
-                    if any(
+                    if x.isVisible()
+                    and any(
                         "Base color" in y.text()
                         for y in x.findChildren(QtW.QLabel, "dropzone_title")
                     )
@@ -392,7 +397,9 @@ class SPContext:
             )
             if color_frame is None:
                 return None
-            color_zone = self._find_named(color_frame, QtW.QToolButton, "colorZone")
+            color_zone = self._find_named_visible(
+                color_frame, QtW.QToolButton, "colorZone"
+            )
             if color_zone is None:
                 return None
             # I couldn't find a way to directly access the RGB values of the color zone,
@@ -407,28 +414,54 @@ class SPContext:
     def get_brush_material(self) -> str | None:
         """Query the UI for brush material by looking for the materialModeParams widget
         and reading its dropzone_text. Checks if a material is selected by seeing if the
-        clear material button exists."""
-        mat_params = self._find_named(
+        clear material button is visible."""
+        mat_params = self._find_named_visible(
             self.main_window, QtW.QWidget, "materialModeParams"
         )
         if mat_params is None:
             return None
-        mat_label = self._find_named(mat_params, QtW.QLabel, "dropzone_text")
-        button_exists = self._find_named(mat_params, QtW.QToolButton, "clear")
-        if mat_label is None or not button_exists:
+        mat_label = self._find_named_visible(mat_params, QtW.QLabel, "dropzone_text")
+        button = self._find_named_visible(mat_params, QtW.QToolButton, "clear")
+        if not mat_label or not button:
             return None
         label = mat_label.text()
         return label if label else None
 
+    def sample_brush_material_color(self) -> Tuple[int, int, int] | None:
+        """Sample three points on the preview material sphere for a selected material
+        and return their average color so that later we can try to choose a brush icon
+        color that loosely matches it."""
+        mat_params = self._find_named_visible(
+            self.main_window, QtW.QWidget, "materialModeParams"
+        )
+        if mat_params is None:
+            return None
+        mat_preview = self._find_named_visible(mat_params, QtW.QLabel, "dropzone_icon")
+        if not mat_preview:
+            return None
+        preview_image = mat_preview.grab().toImage()
+        top_sample = preview_image.pixelColor(21, 5).getRgb()
+        left_sample = preview_image.pixelColor(5, 21).getRgb()
+        middle_sample = preview_image.pixelColor(21, 21).getRgb()
+        combined = tuple(
+            map(
+                sum,
+                zip(top_sample, left_sample, middle_sample),
+            )
+        )
+        return (combined[0] // 3, combined[1] // 3, combined[2] // 3)
+
     def get_brush_alpha(self) -> str | None:
         """Query the UI for brush alpha by looking for the MaskParametersView widget
         and reading its dropzone_text."""
-        alpha_widget = self._find_named(
+        alpha_widget = self._find_named_visible(
             self.main_window, QtW.QFrame, "MaskParametersView"
         )
         if alpha_widget is None:
             return None
-        alpha_label = self._find_named(alpha_widget, QtW.QLabel, "dropzone_text")
+        alpha_label = self._find_named_visible(
+            alpha_widget, QtW.QLabel, "dropzone_text"
+        )
         # Potential future upgrade: do not skip uniform color and instead find the
         # alpha value if the alpha color selector can be easily located in the Qt layout
         if alpha_label is None or alpha_label.text() == "uniform color":
@@ -542,11 +575,10 @@ class SPPlugin(RPCBasePlugin):
             else:
                 prefix, subset = "pphys", SUBSTANCEPAINTER_PHYSPAINT_SUBSET
             if (mat := ctx.get_brush_material()) is not None:
-                self.details.small_icon = tool_objname.lower()
-                self.details.small_icon_text = f"Painting in {mat} (material)"
-                return
-            rgb = ctx.get_paint_color()
-            if rgb is not None:
+                rgb = ctx.sample_brush_material_color()
+            else:
+                rgb = ctx.get_paint_color()
+            if rgb:
                 match = find_closest(
                     rgb, self.prefs.useEvocativeNames, icon_subset=subset
                 )
@@ -554,9 +586,12 @@ class SPPlugin(RPCBasePlugin):
                     self.details.small_icon = f"{prefix}_{match.icon_key_suffix}"
                 else:
                     self.details.small_icon = tool_objname.lower()
-                self.details.small_icon_text = (
-                    f"Painting in {match.display_name} ({match.user_hex})"
-                )
+                if mat:
+                    self.details.small_icon_text = f"Painting in {mat}"
+                else:
+                    self.details.small_icon_text = (
+                        f"Painting in {match.display_name} ({match.user_hex})"
+                    )
                 return
         # No colored icons, or not Paint/Physical Paint tools
         self.details.small_icon = tool_objname.lower()

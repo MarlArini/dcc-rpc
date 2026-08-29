@@ -653,6 +653,72 @@ def test_get_brush_material_runtimeerror_returns_none(sp):
     assert ctx.get_brush_material() is None
 
 
+def test_get_brush_material_none_when_clear_button_hidden(sp):
+    """The 'clear' QToolButton is always in the widget tree — Painter hides it
+    rather than removing it when no material is assigned. Testing for its
+    existence therefore always passed and reported a material that wasn't
+    selected; the selection signal is its visibility."""
+    mmp = sp.make_material_mode_params(
+        dropzone_text="Worn Leather", material_selected=False
+    )
+    mw = sp.make_qt_main_window(children=[mmp])
+    ctx = _ctx_with(sp, mw)
+    assert ctx.get_brush_material() is None
+
+
+def test_find_named_visible_skips_hidden_twin(sp):
+    """Painter keeps one parameter panel per brush mode parented at once and
+    hides the inactive ones. findChild returns the first depth-first match,
+    which may be a hidden twin — _find_named_visible has to walk past it."""
+    hidden = sp.make_material_mode_params(dropzone_text="Stale Material")
+    hidden._visible = False
+    shown = sp.make_material_mode_params(dropzone_text="Live Material")
+    mw = sp.make_qt_main_window(children=[hidden, shown])
+    ctx = _ctx_with(sp, mw)
+    assert ctx.get_brush_material() == "Live Material"
+
+
+# --- sample_brush_material_color ---
+
+def test_sample_brush_material_color_averages_three_points(sp):
+    """The three sampled points on the preview sphere are averaged, so a
+    thumbnail with different colors at each point yields their mean."""
+    mmp = sp.make_material_mode_params(
+        preview_color=None,
+        preview_pixels={
+            (21, 5): (30, 60, 90),     # top
+            (5, 21): (60, 90, 120),    # left
+            (21, 21): (90, 120, 150),  # middle
+        },
+    )
+    mw = sp.make_qt_main_window(children=[mmp])
+    ctx = _ctx_with(sp, mw)
+    assert ctx.sample_brush_material_color() == (60, 90, 120)
+
+
+def test_sample_brush_material_color_uniform_thumbnail(sp):
+    """A flat thumbnail averages to its own color."""
+    mmp = sp.make_material_mode_params(preview_color=(120, 90, 60))
+    mw = sp.make_qt_main_window(children=[mmp])
+    ctx = _ctx_with(sp, mw)
+    assert ctx.sample_brush_material_color() == (120, 90, 60)
+
+
+def test_sample_brush_material_color_none_when_no_thumbnail(sp):
+    """materialModeParams present but carrying no 'dropzone_icon' — return
+    None rather than crashing on grab()."""
+    mmp = sp.make_material_mode_params(preview_color=None)
+    mw = sp.make_qt_main_window(children=[mmp])
+    ctx = _ctx_with(sp, mw)
+    assert ctx.sample_brush_material_color() is None
+
+
+def test_sample_brush_material_color_none_when_view_missing(sp):
+    mw = sp.make_qt_main_window(children=[])
+    ctx = _ctx_with(sp, mw)
+    assert ctx.sample_brush_material_color() is None
+
+
 # ---------------------------------------------------------------------------
 # SPPlugin: update_small_icon / update_large_icon / callbacks / update_details
 # ---------------------------------------------------------------------------
@@ -873,7 +939,67 @@ def test_update_small_icon_colored_disabled_paint_with_material_shows_painting_i
 
     sp_plugin_clean.update_small_icon(ctx)
     assert sp_plugin_clean.details.small_icon == "paint"
-    assert sp_plugin_clean.details.small_icon_text == "Painting in Worn Leather (material)"
+    assert sp_plugin_clean.details.small_icon_text == "Painting in Worn Leather"
+
+
+def test_update_small_icon_material_color_beats_paint_color(sp, sp_plugin_clean):
+    """With a material assigned the colored icon comes from the material
+    thumbnail, not from the Base color dropzone — the two are different colors
+    here, so the chosen icon key has to be the one the material maps to."""
+    from colors import find_closest, SUBSTANCEPAINTER_PAINT_SUBSET  # noqa: PLC0415
+
+    sp_plugin_clean.prefs.displaySmallIcon = True
+    sp_plugin_clean.prefs.enableColoredIcons = True
+    sp_plugin_clean.session.is_rendering = False
+
+    material_rgb = (18, 140, 220)  # a blue nothing like the red paint color
+    toolbar = sp.make_toolbar(buttons=[sp.make_tool_button("Paint", checked=True)])
+    mmp = sp.make_material_mode_params(
+        dropzone_text="Worn Leather", preview_color=material_rgb
+    )
+    # make_source_parameters_view's colorZone is red (255, 0, 0).
+    spv = sp.make_source_parameters_view()
+    mw = sp.make_qt_main_window(children=[toolbar, mmp, spv])
+    ctx = _ctx_with(sp, mw)
+
+    expected = find_closest(
+        material_rgb,
+        sp_plugin_clean.prefs.useEvocativeNames,
+        icon_subset=SUBSTANCEPAINTER_PAINT_SUBSET,
+    )
+    from_paint_color = find_closest(
+        (255, 0, 0),
+        sp_plugin_clean.prefs.useEvocativeNames,
+        icon_subset=SUBSTANCEPAINTER_PAINT_SUBSET,
+    )
+    assert expected.icon_key_suffix != from_paint_color.icon_key_suffix
+
+    sp_plugin_clean.update_small_icon(ctx)
+    assert sp_plugin_clean.details.small_icon == f"paint_{expected.icon_key_suffix}"
+    # The hover text names the material rather than the sampled color.
+    assert sp_plugin_clean.details.small_icon_text == "Painting in Worn Leather"
+
+
+def test_update_small_icon_unsampleable_material_falls_back_to_tool_icon(
+    sp, sp_plugin_clean
+):
+    """A material is assigned but its thumbnail can't be sampled: with no rgb
+    the colored branch is skipped entirely and we land on the plain tool icon
+    with the localized tool label, not a half-filled 'Painting in' string."""
+    sp_plugin_clean.prefs.displaySmallIcon = True
+    sp_plugin_clean.prefs.enableColoredIcons = True
+    sp_plugin_clean.session.is_rendering = False
+
+    toolbar = sp.make_toolbar(buttons=[sp.make_tool_button("Paint", checked=True)])
+    mmp = sp.make_material_mode_params(
+        dropzone_text="Worn Leather", preview_color=None
+    )
+    mw = sp.make_qt_main_window(children=[toolbar, mmp])
+    ctx = _ctx_with(sp, mw)
+
+    sp_plugin_clean.update_small_icon(ctx)
+    assert sp_plugin_clean.details.small_icon == "paint"
+    assert sp_plugin_clean.details.small_icon_text == "Paint"
 
 
 def test_update_small_icon_no_active_tool_clears_icon(sp, sp_plugin_clean):
@@ -975,7 +1101,7 @@ def test_find_named_with_none_parent_returns_none(sp):
     """_find_named's `if parent is None: return None` branch."""
     ctx = SPContext(texture_sets=[], stack=sp.make_stack(), main_window=None, active_only=False)
     # Pass None as parent directly — exercises the early return.
-    assert ctx._find_named(None, object, "anything") is None
+    assert ctx._find_named_visible(None, object, "anything") is None
 
 
 def test_get_brush_material_view_found_but_no_label_returns_none(sp):
