@@ -1,6 +1,6 @@
 """
 DesignerPresence is a Discord Rich Presence client plugin for Adobe Substance 3D Designer.
-DesignerPresence has been tested on Substance Designer 16.0.1 (Windows 11).
+DesignerPresence has been tested on Substance Designer 16.0.5 (Windows 11).
 For more info, see https://github.com/MarlArini/dcc-rpc.
 """
 
