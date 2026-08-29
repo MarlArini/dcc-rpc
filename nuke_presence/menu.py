@@ -1,6 +1,6 @@
 """
 NukePresence is a Discord Rich Presence client plugin for The Foundry's Nuke,
-NukeX, and NukeStudio. NukePresence has been tested on Nuke[s] 17.0.2.
+NukeX, and NukeStudio. NukePresence has been tested on Nuke[s] 17.1v1.
 For more info, see https://github.com/MarlArini/dcc-rpc.
 """
 
