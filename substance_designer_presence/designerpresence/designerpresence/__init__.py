@@ -81,7 +81,7 @@ class SDContext:
 
     def package_name(self) -> str:
         path = self.package.getFilePath()
-        return Path(path).name if path else "Unsaved Package"
+        return Path(path).stem if path else "Unsaved Package"
 
     def graph_name(self) -> str:
         v = self.graph.getAnnotationPropertyValueFromId("identifier")
