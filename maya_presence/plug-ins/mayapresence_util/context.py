@@ -1,4 +1,5 @@
 """Scene information retrieval class for MayaPresence."""
+
 import os
 from pathlib import Path
 from typing import cast, List, Tuple
@@ -10,9 +11,10 @@ from common import plural as mp_plural, shorten_number, get_file_size_str
 from .shared_state import MP_PREFS
 from . import extension_types
 
+
 class MPContext:
     @classmethod
-    def capture(cls) -> MPContext:
+    def capture(cls) -> "MPContext":
         return cls()
 
     def get_gpu_str(self) -> str:
