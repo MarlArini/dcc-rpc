@@ -1,5 +1,5 @@
 ## What It Looks Like
-![Cinema 4D Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/c4d.png)
+![Cinema 4D Rich Presence status](../readme_images/c4d.png)
 
 ## Installation Instructions
 There may be an easier way to install; I don't use Cinema 4D so I'm not familiar with plugin installation. This method works.

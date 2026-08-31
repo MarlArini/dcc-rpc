@@ -3,6 +3,7 @@ AI-Generated (Opus 4.7)
 Bundle each plugin into a deployable form under ./dist/.
 """
 import ast
+import re
 import shutil
 import subprocess
 import sys
@@ -12,8 +13,13 @@ REPO = Path(__file__).resolve().parent
 DIST = REPO / "dist"
 COMMON_SRC = REPO / "common"
 COLOR_SRC = REPO / "colors"  # package dir (color_find.py + palette.csv + iscc-nbs.csv + Attribution.txt)
+README_IMAGES = REPO / "readme_images"  # Rich Presence screenshots, one per app
 
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "build")
+
+# A markdown image link pointing into readme_images/, whatever relative prefix
+# it carries: ../readme_images/c4d.png, ../../../readme_images/designer.png.
+_README_IMAGE_LINK = re.compile(r"\]\((?:[^)]*/)?readme_images/([^)/]+)\)")
 
 
 def _find_pypresence() -> Path:
@@ -63,6 +69,49 @@ def _write_rewritten(src: Path, dst: Path, modules: list[str], prefix: str = "."
     _validate_python(dst)
 
 
+def _localize_readme_images(readme: Path) -> None:
+    """Copy the screenshots an already-bundled README references in beside it,
+    and repoint the README at the copies.
+
+    In the repo each plugin README links to `../readme_images/<app>.png`, which
+    is what resolves on GitHub. Once the README ships inside a release archive
+    there is no readme_images/ alongside it, so that link dangles — hence the
+    copy plus rewrite to a bare `<app>.png`.
+
+    A README that references an image which doesn't exist is a build-time
+    failure, the same posture as _validate_python: catch it here rather than
+    shipping an archive with a broken image in it.
+    """
+    if not readme.exists():
+        return
+    text = readme.read_text(encoding="utf-8")
+    names = set(_README_IMAGE_LINK.findall(text))
+    if not names:
+        return
+    for name in sorted(names):
+        src = README_IMAGES / name
+        if not src.exists():
+            sys.exit(f"[build] {readme} references a missing image: {src}")
+        shutil.copy2(src, readme.parent / name)
+    readme.write_text(_README_IMAGE_LINK.sub(r"](\1)", text), encoding="utf-8")
+
+
+def _bundle_readme(src_dir: Path, dst_dir: Path) -> None:
+    """Copy `src_dir/README.md` into `dst_dir` and localize its screenshots.
+
+    For the bundles built by copying individual source files rather than a
+    whole tree (Nuke, Painter, Krita, GIMP), which would otherwise ship with
+    no install or usage documentation at all. The tree-copying bundles (Maya,
+    Designer, C4D) already have their README in place and just need
+    _localize_readme_images.
+    """
+    readme = src_dir / "README.md"
+    if not readme.exists():
+        sys.exit(f"[build] expected a README at {readme}")
+    shutil.copy2(readme, dst_dir / "README.md")
+    _localize_readme_images(dst_dir / "README.md")
+
+
 def _write_common_subpackage(parent: Path, pypresence_src: Path) -> None:
     """Build a `common/` subpackage under `parent`:
         common/
@@ -105,6 +154,7 @@ def _bundle_maya(pypresence_src: Path) -> None:
     shutil.copytree(src, dst / "maya_presence", ignore=IGNORE)
     shutil.move(dst / "maya_presence" / "maya_presence.mod", dst / "maya_presence.mod")
     _drop_runtime(dst / "maya_presence" / "plug-ins", pypresence_src)
+    _localize_readme_images(dst / "maya_presence" / "README.md")
     print(f"[build] maya_presence/  (Maya module: {dst.name})")
 
 
@@ -142,6 +192,10 @@ def _bundle_designer(pypresence_src: Path) -> None:
     # common.py auto-detects PySide6 (which Designer's plugin Python ships).
     _write_common_subpackage(inner, pypresence_src)
 
+    # Before makepackage.py runs — it zips whatever it finds under dst, so the
+    # screenshot has to be in place to make it into the .sdplugin.
+    _localize_readme_images(inner / "README.md")
+
     result = subprocess.run(
         [sys.executable, "makepackage.py"],
         cwd=dst, capture_output=True, text=True, check=False,
@@ -166,6 +220,8 @@ def _bundle_nuke(pypresence_src: Path) -> None:
     """Produces:
         dist/nuke_presence/                  (drop into ~/.nuke/)
           menu.py
+          README.md
+          nuke.png
           common.py
           pypresence/
     """
@@ -177,6 +233,7 @@ def _bundle_nuke(pypresence_src: Path) -> None:
     dst.mkdir(parents=True)
     shutil.copy2(src, dst / "menu.py")
     _drop_runtime(dst, pypresence_src)
+    _bundle_readme(REPO / "nuke_presence", dst)
     print("[build] nuke_presence/")
 
 
@@ -185,6 +242,8 @@ def _bundle_painter(pypresence_src: Path) -> None:
         dist/substance_painter_presence/     (drop into Painter user_plugins/startup/)
           __init__.py
           painter_presence.py                (rewritten: from .common / .colors / .pypresence)
+          README.md
+          painter.png
           common.py                           (rewritten: from .pypresence)
           colors/
             __init__.py
@@ -229,6 +288,7 @@ def _bundle_painter(pypresence_src: Path) -> None:
     shutil.copytree(COLOR_SRC, dst / "colors", ignore=IGNORE)
     # pypresence/ is third-party — keep as-is.
     shutil.copytree(pypresence_src, dst / "pypresence", ignore=IGNORE)
+    _bundle_readme(src, dst)
     print("[build] substance_painter_presence/")
 
 
@@ -236,6 +296,8 @@ def _bundle_krita(pypresence_src: Path) -> None:
     """Produces:
         dist/krita_presence/                 (drop into pykrita/)
           krita_presence.desktop
+          README.md
+          krita.png
           krita_presence/
             __init__.py                     (unchanged: `from .krita_presence import *`)
             krita_presence.py               (rewritten: `from .common`, `from .colors`)
@@ -278,6 +340,8 @@ def _bundle_krita(pypresence_src: Path) -> None:
 
     # colors/ uses internal relative imports already; copy as-is.
     shutil.copytree(COLOR_SRC, pkg_dst / "colors", ignore=IGNORE)
+    # README sits at the bundle root next to the .desktop, mirroring the repo.
+    _bundle_readme(src_root, dst_root)
     print("[build] krita_presence/")
 
 
@@ -304,6 +368,7 @@ def _bundle_c4d(pypresence_src: Path) -> None:
     dst = DIST / "c4d_presence"
     shutil.copytree(src, dst, ignore=IGNORE)
     _drop_runtime(dst, pypresence_src)
+    _localize_readme_images(dst / "README.md")
     print("[build] c4d_presence/")
 
 
@@ -312,6 +377,8 @@ def _bundle_gimp(pypresence_src: Path) -> None:
         dist/gimp_presence/                  (drop into GIMP plug-ins/)
           gimp_presence.py
           settings_dialog.py
+          README.md
+          gimp.png
           common.py
           colors/
             __init__.py
@@ -335,6 +402,7 @@ def _bundle_gimp(pypresence_src: Path) -> None:
     shutil.copy2(src, dst / "gimp_presence.py")
     shutil.copy2(src2, dst / "settings_dialog.py")
     _drop_runtime(dst, pypresence_src, colors=True)
+    _bundle_readme(REPO / "gimp_presence", dst)
     print("[build] gimp_presence/")
 
 
@@ -343,6 +411,8 @@ def build() -> None:
         sys.exit(f"[build] missing {COMMON_SRC}")
     if not COLOR_SRC.exists():
         sys.exit(f"[build] missing {COLOR_SRC}")
+    if not README_IMAGES.exists():
+        sys.exit(f"[build] missing {README_IMAGES}")
     pypresence_src = _find_pypresence()
 
     if DIST.exists():

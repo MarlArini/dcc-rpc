@@ -1,5 +1,5 @@
 ## What It Looks Like
-![Krita Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/krita.png)
+![Krita Rich Presence status](../readme_images/krita.png)
 
 ## Installation Instructions
 #### ZIP Install (easiest):
