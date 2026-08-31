@@ -1,6 +1,7 @@
 """
 Maya scene + plug-in lifecycle callback registration.
 """
+
 import time
 from typing import Set, Tuple
 
@@ -26,7 +27,7 @@ def mp_observe_plugin_unload(string_array, clientData):  # pylint: disable=unuse
     extension_types.rebuild()
 
 
-def mp_on_file(*args): #pylint: disable=unused-argument
+def mp_on_file(*args):  # pylint: disable=unused-argument
     mp_install_render_handlers()
     if MP_PREFS.resetTimer:
         MP_SESSION.start_time = time.time()
@@ -34,18 +35,14 @@ def mp_on_file(*args): #pylint: disable=unused-argument
 
 def mp_add_callbacks():
     """Register all callbacks.
-      1. kAfterNew, kAfterOpen: re-run the render-hook installer so a
-         scene change can't strand us with unregistered hooks. Install is
-         idempotent and respects MP_PREFS.useRenderHooks.
-      2. kAfterPluginLoad: detect when a monitored render engine just
-         became available so we can populate its type tables.
-      3. kAfterPluginUnload: detect when a monitored engine went away."""
-    k_new = om.MSceneMessage.addCallback(
-        om.MSceneMessage.kAfterNew, mp_on_file
-    )
-    k_open = om.MSceneMessage.addCallback(
-        om.MSceneMessage.kAfterOpen, mp_on_file
-    )
+    1. kAfterNew, kAfterOpen: re-run the render-hook installer so a
+       scene change can't strand us with unregistered hooks. Install is
+       idempotent and respects MP_PREFS.useRenderHooks.
+    2. kAfterPluginLoad: detect when a monitored render engine just
+       became available so we can populate its type tables.
+    3. kAfterPluginUnload: detect when a monitored engine went away."""
+    k_new = om.MSceneMessage.addCallback(om.MSceneMessage.kAfterNew, mp_on_file)
+    k_open = om.MSceneMessage.addCallback(om.MSceneMessage.kAfterOpen, mp_on_file)
     k_load = om.MSceneMessage.addStringArrayCallback(
         om.MSceneMessage.kAfterPluginLoad, mp_observe_plugin_load
     )

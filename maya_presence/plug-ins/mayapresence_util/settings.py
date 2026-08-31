@@ -1,11 +1,13 @@
 """Plugin settings class for the Maya plugin, with render-specific functionality
 and optionVar-based persistence."""
+
 from dataclasses import dataclass, field, fields
 from typing import Any, ClassVar, Dict, List, Tuple, get_type_hints
 
-import maya.cmds as cmds # pyright: ignore[reportMissingImports] pylint: disable=import-error
+import maya.cmds as cmds  # pyright: ignore[reportMissingImports] pylint: disable=import-error
 
 from common import SharedSettings, RenderSettings
+
 
 @dataclass
 class MPSettings(SharedSettings, RenderSettings):

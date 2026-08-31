@@ -9,6 +9,7 @@ submodules go through normal Python import machinery, so
 `import mayapresence_util.shared_state` finds an existing
 entry
 """
+
 from typing import Any, Optional
 
 from common import SessionInfo, RPCUpdateDetails

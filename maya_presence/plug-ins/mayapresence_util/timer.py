@@ -3,6 +3,7 @@ Main-thread polling timer.
 The tick body also handles Redshift's behavior of not creating its
 render options node until its settings menu is opened.
 """
+
 import maya.api.OpenMaya as om  # pyright: ignore[reportMissingImports, reportMissingModuleSource] pylint: disable=import-error
 
 from .shared_state import MP_PREFS

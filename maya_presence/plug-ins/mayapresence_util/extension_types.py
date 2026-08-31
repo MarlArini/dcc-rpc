@@ -6,6 +6,7 @@ plug-in. We just rebuild the sets when a plug-in load/unload
 could have changed the contents.
 
 """
+
 from typing import FrozenSet
 
 import maya.cmds as cmds  # pyright: ignore[reportMissingImports] pylint: disable=import-error

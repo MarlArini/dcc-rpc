@@ -10,6 +10,7 @@ Dependency order:
     L5  callbacks, timer
     L6  settings_menu
 """
+
 # ruff: noqa: F401
 # L0
 from . import extension_types

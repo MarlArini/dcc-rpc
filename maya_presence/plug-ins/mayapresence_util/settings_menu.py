@@ -1,4 +1,5 @@
 """Settings menu installation."""
+
 import maya.cmds as cmds  # pyright: ignore[reportMissingImports] pylint: disable=import-error
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # pyright: ignore[reportMissingImports] pylint: disable=import-error
 

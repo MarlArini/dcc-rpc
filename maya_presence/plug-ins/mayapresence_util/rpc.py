@@ -1,13 +1,9 @@
 """RPC functionality: handling static/cycling fields and updating details struct."""
-import maya.cmds as cmds # pyright: ignore[reportMissingImports] pylint: disable=import-error
+
+import maya.cmds as cmds  # pyright: ignore[reportMissingImports] pylint: disable=import-error
 
 
-from common import (
-    update_buttons,
-    advance_cycle,
-    update_slot,
-    format_render_details
-)
+from common import update_buttons, advance_cycle, update_slot, format_render_details
 
 from .context import MPContext
 from .shared_state import MP_UPDATE_DETAILS, MP_PREFS, MP_SESSION, mp_print, _get_worker
@@ -125,7 +121,7 @@ def mp_update_presence_details(ctx: MPContext):
             file_name=fname,
             res=res,
             rendered_frames=MP_SESSION.rendered_frames,
-            prefs=MP_PREFS
+            prefs=MP_PREFS,
         )
     elif MP_PREFS.enableDetails:
         update_slot(
