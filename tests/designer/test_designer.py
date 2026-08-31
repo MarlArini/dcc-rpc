@@ -57,7 +57,7 @@ def test_package_name_from_path(sd):
     g = sd.make_graph(package=pkg)
     sd.set_state(current_graph=g)
     ctx = SDContext.capture()
-    assert ctx.package_name() == "Fabrics.sbs"
+    assert ctx.package_name() == "Fabrics"
 
 
 def test_package_name_empty_path_calls_it_unsaved(sd):

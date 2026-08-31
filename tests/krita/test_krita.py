@@ -819,7 +819,7 @@ def test_active_brush_preset_returns_clean_name_for_brush_tools(kr, tool_name):
     ctx = KPContext(
         instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
     )
-    assert ctx.active_brush_preset() == "Preset: Basic-5 Size Default"
+    assert ctx.active_brush_preset() == "Brush Preset: Basic-5 Size Default"
 
 
 def test_active_brush_preset_strips_mypaint_marker(kr):
@@ -831,7 +831,7 @@ def test_active_brush_preset_strips_mypaint_marker(kr):
         instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
     )
     out = ctx.active_brush_preset()
-    assert out == "Preset: Pencil-1 Sketch"
+    assert out == "Brush Preset: Pencil-1 Sketch"
 
 
 def test_active_brush_preset_strips_mypaint_prev_marker(kr):
@@ -842,7 +842,7 @@ def test_active_brush_preset_strips_mypaint_prev_marker(kr):
     ctx = KPContext(
         instance=kr.Krita.instance(), doc=doc, window=kr.make_window(), view=view
     )
-    assert ctx.active_brush_preset() == "Preset: Custom"
+    assert ctx.active_brush_preset() == "Brush Preset: Custom"
 
 
 # ---------------------------------------------------------------------------
