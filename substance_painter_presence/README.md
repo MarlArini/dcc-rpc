@@ -1,3 +1,6 @@
+## What It Looks Like
+![Adobe Substance 3D Painter Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/painter.png)
+
 ## Installation Instructions
 - Download the ZIP from Releases
 - Open Painter and go to Python -> Plugins Folder

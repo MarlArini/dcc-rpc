@@ -1,3 +1,6 @@
+## What It Looks Like
+![Foundry Nuke Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/nuke.png)
+
 ## Installation Instructions
 - Download the ZIP from releases
 - Extract the folder into your ~/.nuke directory (on Windows: C:/Users/Your_User_Name/.nuke)

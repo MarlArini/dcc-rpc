@@ -1,3 +1,6 @@
+## What It Looks Like
+![GIMP Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/gimp.png)
+
 ## Installation Instructions
 - Download the ZIP from releases
 - Open GIMP and go to Edit -> Preferences -> Folders -> Plug-Ins to find your plug-ins folder

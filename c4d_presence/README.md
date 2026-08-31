@@ -1,3 +1,6 @@
+## What It Looks Like
+![Cinema 4D Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/c4d.png)
+
 ## Installation Instructions
 There may be an easier way to install; I don't use Cinema 4D so I'm not familiar with plugin installation. This method works.
 - Download the Cinema 4D ZIP from releases, or clone the repository and copy the c4d_presence folder

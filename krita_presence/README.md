@@ -1,3 +1,6 @@
+## What It Looks Like
+![Krita Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/krita.png)
+
 ## Installation Instructions
 #### ZIP Install (easiest):
 - Download krita_presence.zip from the releases

@@ -1,6 +1,27 @@
 ## DCC-RPC
 Discord Rich Presence integrations for a number of creative applications. Currently supported: Krita, GIMP, Autodesk Maya, Foundry Nuke, Cinema 4D, Adobe Substance 3D Painter, and Adobe Substance 3D Designer. Plugins can be downloaded from the releases page. If you want to develop and build locally, you can clone the repository, `uv sync`, and run `uv run build.py` to execute the build script. Note that `uv sync` will add PySide6 to the venv as well, since many of the plugins use PySide6 functionality and having it in the venv prevents huge numbers of spurious errors.
 
+## What It Looks Like
+Each plugin surfaces application-specific information in the Discord status. These are real captures, one per supported application:
+
+<table>
+  <tr>
+    <td align="center" width="33%"><b>Krita</b><br><img src="readme_images/krita.png" alt="Krita Rich Presence status" width="100%"></td>
+    <td align="center" width="33%"><b>GIMP</b><br><img src="readme_images/gimp.png" alt="GIMP Rich Presence status" width="100%"></td>
+    <td align="center" width="33%"><b>Autodesk Maya</b><br><img src="readme_images/maya.png" alt="Maya Rich Presence status" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><b>Foundry Nuke</b><br><img src="readme_images/nuke.png" alt="Nuke Rich Presence status" width="100%"></td>
+    <td align="center" width="33%"><b>Cinema 4D</b><br><img src="readme_images/c4d.png" alt="Cinema 4D Rich Presence status" width="100%"></td>
+    <td align="center" width="33%"><b>Substance 3D Painter</b><br><img src="readme_images/painter.png" alt="Substance Painter Rich Presence status" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><b>Substance 3D Designer</b><br><img src="readme_images/designer.png" alt="Substance Designer Rich Presence status" width="100%"></td>
+    <td width="33%"></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
 ## Common Functionality
 All plugins share a basic design pattern. There are several different pieces of information they can surface, specific to the application and context you're in (e.g., number of meshes in a modeling application like Maya, or number of nodes in a node-based editor like Designer). You can choose which information is displayed in the details field and the state field of the Rich Presence visual, or allow one or both of those fields to cycle between different values. The default is for each application to show the name of the project/file you're currently working on in the details field, and to show some fixed app-specific piece of information (layer name, poly count, etc.) in the state field.
 

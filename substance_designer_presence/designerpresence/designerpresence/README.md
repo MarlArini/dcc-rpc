@@ -1,3 +1,6 @@
+## What It Looks Like
+![Adobe Substance 3D Designer Rich Presence status](https://raw.githubusercontent.com/MarlArini/dcc-rpc/main/readme_images/designer.png)
+
 ## Installation Instructions
 - Download the ZIP from releases
 - Open Designer and go to Tools -> Plugin Manager -> Install
